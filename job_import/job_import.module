@@ -1,0 +1,271 @@
+<?php
+
+function job_import_menu(){
+	$menu = array();
+
+	$menu['admin/content/job_import_dash'] = array(
+		'title' => t('Job Import'),
+		'description' => t('Import old stuff from Healthjobconnect.com'), 
+		'page callback' => 'drupal_get_form',
+		'page arguments' => array('job_import_dashboard'),
+		'access arguments' => array('administer content'),
+		'type' => MENU_NORMAL_ITEM,
+	); 
+
+	return $menu;
+}
+
+function job_import_dashboard($form, &$form_state){
+	$form = array(); 
+	$form['markup'] = array(
+		'#markup' => '<h3>Import Employers before Jobs because of dependencies</h3>', 
+	);
+
+	$form['import_employers'] = array(
+		'#type' => 'submit',
+		'#value' => t('Import Employers'),
+	);
+
+	$form['import_jobs'] = array(
+		'#type' => 'submit',
+		'#value' => t('Import Jobs'),
+		'#description' => t('Only run this after the employers have been updated'),
+	);
+
+	return $form;
+}
+
+function job_import_dashboard_submit($form, &$form_state){
+	$counter = 0;
+	$resumes = 0; 
+	if($form_state['triggering_element']['#value'] == 'Import Jobs'){
+		if(db_set_active('hjc_old')){
+			$job_listings = db_select('listings','l')
+				->fields('l')
+				->execute()->fetchAll();
+		}
+		foreach($job_listings as $listing){
+			if($listing->listing_type_sid == 6){
+				if(db_set_active('hjc_old')){
+					//Get the country from the old db
+					$country = db_select('countries','c')
+						->fields('c',array('country_code', 'country_name'))
+						->condition('sid',$listing->Location_Country, '=')
+						->execute()->fetchAssoc();
+
+					//get the city from the old db
+					$state = db_select('states','s')
+						->fields('s', array('state_name', 'state_code'))
+						->condition('sid', $listing->Location_State, '=')
+						->execute()->fetchAssoc(); 
+
+					//get category form old database
+					$category = db_select('listing_field_list','l')
+						->fields('l', array('value'))
+						->condition('sid', $listing->JobCategory, '=')
+						->execute()->fetchField();
+
+					//set new node employment type
+					$employment_type = db_select('listing_field_list','l')
+						->fields('l', array('value'))
+						->condition('sid',$listing->EmploymentType, '=')
+						->execute()->fetchField(); 
+
+					//split the websites if there are more than one
+					if(strpos($listing->Site, ',')){
+						$web_ids = explode(',',$listing->Site);
+					}elseif(!empty($listing->Site) && !is_null($listing->Site) && $listing->Site != ''){
+						$web_ids = array($listing->Site);
+					}else{
+						$web_ids = array(NULL); 
+					}
+					//set up websites because there may be multiple
+					$websites = array(); 
+					foreach($web_ids as $website){
+						$site = db_select('listing_field_list', 'l')
+							->fields('l', array('value'))
+							->condition('sid',$website, '=')
+							->execute()->fetchField(); 
+							$websites[] = $site; 
+					}
+
+					$employer = db_select('users','u')
+						->fields('u', array('username'))
+						->condition('sid',$listing->user_sid, '=')
+						->execute()->fetchField(); 
+
+					$redirect_url = db_select('listings_properties','l')
+						->fields('l',array('value'))
+						->condition('object_sid',$listing->sid,'=')
+						->condition('id','ApplicationSettings')
+						->execute()->fetchField();
+
+					//set up new node
+					$new_node = new stdClass();
+					$new_node->type = 'job_posting'; 
+					$new_node->field_featured['und'][0]['value'] = $listing->featured; 
+					$new_node->title = $listing->Title; 
+					$new_node->field_employment_type['und'][0]['value'] = ucwords($employment_type); 
+					$new_node->field_job_description['und'][0]['value'] = $listing->JobDescription;
+					$new_node->field_job_description['und'][0]['format'] = 'full_html'; 
+					$new_node->field_job_requirement['und'][0]['value'] = $listing->JobRequirements;
+					$new_node->field_job_requirement['und'][0]['format'] = 'full_html'; 
+					$new_node->field_keywords['und'][0]['value'] = $listing->keywords; 
+					$new_node->field_keywords['und'][0]['format'] = 'full_html'; 
+					$new_node->field_application_url['und'][0]['value'] = $redirect_url; 
+					if(strtotime($listing->expiration_date) < time()){
+						$new_node->status = 0;
+					}else{
+						$new_node->status = 1;
+					}
+					$location = array(
+						'name' => $employer->CompanyName,
+						'street' => $employer->Location_Address,
+						'city' => $listing->Location_City,
+						'postal_code' => $listing->Location_ZipCode,
+						'phone' => $employer->PhoneNumber,
+						'province' => $state['state_code'],
+						'province_name' => $state['state_name'],
+						'country_name' => strtolower($country['country_name']),
+						'country' => strtolower($country['country_code']), 
+					);  
+				}
+				if(db_set_active()){
+					//match category to the new taxonomy and pull the tid
+					$category_tid = db_select('taxonomy_term_data','t')
+						->fields('t', array('tid'))
+						->condition('vid',2,'=')
+						->condition('name', $category,'=')
+						->execute()->fetchField(); 
+					$new_node->field_category['und'][0]['tid'] = $category_tid;
+					
+					foreach($websites as $key => $website){
+						if(!is_null($website)){
+							dpm($website); 
+							//get the website taxonomy id
+							$website_tax_id = db_select('taxonomy_term_data','t')
+								->fields('t',array('tid'))
+								->condition('vid',4,'=')
+								->condition('name',$website,'=')
+								->execute()->fetchField();
+							if($website_tax_id != '' || !empty($website_tax_id)){
+								$new_node->field_location_website['und'][$key]['tid'] = $website_tax_id;
+							}
+						}
+					} 
+
+					$employer_tax_id = db_select('taxonomy_term_data','t')
+						->fields('t',array('tid'))
+						->condition('vid',3,'=')
+						->condition('name',$employer,'=')
+						->execute()->fetchField();
+					$new_node->field_employer['und'][0]['tid'] = $employer_tax_id; 
+
+					//save the node
+					/*node_save($new_node); 
+
+					db_merge('scheduler')
+						->key(array('nid' => $new_node->nid))
+						->fields(array(
+							'nid' => $new_node->nid,
+							'publish_on' => strtotime($listing->activation_date),
+							'unpublish_on' => strtotime($listing->expiration_date),
+						))->execute(); 
+
+					//Set number of views for the node in the statistics module (node_count table)
+					db_merge('node_counter')
+						->key(array('nid' => $new_node->nid))
+						->fields(array(
+							'totalcount' => $listing->views,
+						))->execute(); 
+		 		 	 
+					//save the location
+					$lid = location_save($location);
+					//save the location reference
+					db_insert('location_instance')
+						->fields(array(
+							'nid' => $new_node->nid,
+							'vid' => $new_node->nid, 
+							'lid' => $lid,
+						))
+						->execute();
+						$counter++; */
+				}
+			}else{
+				$resumes++; 
+				db_set_active();
+			}
+		} 
+		drupal_set_message($counter . ' nodes imported and ' . $resumes . ' skipped.'); 
+	}elseif($form_state['triggering_element']['#value'] == 'Import Employers'){
+		$employers = db_select('users','u')
+			->fields('u')
+			->execute()->fetchAll();
+			//dpm($employers); 
+
+		foreach($employers as $employer){
+			if(db_set_active('hjc_old')){
+				$term = new stdClass();
+				$term->vid = 3;
+				$term->name = $employer->username;
+				$term->field_company_name['und'][0]['value'] = $employer->CompanyName; 
+				$term->field_website['und'][0]['value'] = $employer->WebSite;
+				$term->description = $employer->CompanyDescription; 
+				$term->format = 'full_html';
+				$term->field_email['und'][0]['value'] = $employer->email_address; 
+				$term->field_featured['und'][0]['value'] = $employer->featured; 
+
+				//handle file if there is one
+				$logo = $employer->Logo;
+				if(!empty($logo)){
+					$old_file = db_select('uploaded_files','u')
+						->fields('u')
+						->condition('id', $logo, '=')
+						->execute()->fetchAssoc(); 
+				}
+
+				$state = db_select('states','s')
+					->fields('s', array('state_name', 'state_code'))
+					->condition('sid', $employer->Location_State, '=')
+					->execute()->fetchAssoc(); 
+
+				$country = db_select('countries','c')
+					->fields('c',array('country_code'))
+					->condition('sid',$employer->Location_Country, '=')
+					->execute()->fetchField(); 
+
+				$location = array(
+					'name' => $employer->CompanyName,
+					'street' => $employer->Location_Address,
+					'city' => $employer->Location_City,
+					'postal_code' => $employer->Location_ZipCode,
+					'phone' => $employer->PhoneNumber,
+					'province' => $state['state_code'],
+					'province_name' => $state['state_name'],
+					'country_name' => strtolower($country), 
+				); 
+			}
+			//reset active database
+			if(db_set_active()){
+				//save the image
+				/*$file = fopen('http://healthjobconnect.com/files/pictures/'.$old_file['saved_file_name'], 'r');
+				$saved = file_save_data($file, 'public://'.$old_file['saved_file_name'], $replace = FILE_EXISTS_ERROR); 
+				if($saved){
+					$term->field_logo['und'][0]['fid'] = $saved->fid;  
+				}
+				fclose($file);  
+				//save the term
+				taxonomy_term_save($term); 
+				//save the location
+				$lid = location_save($location);
+				//save the location reference
+				db_insert('location_instance')
+					->fields(array(
+						'lid' => $lid,
+						'genid' => 'taxonomy:'.$term->tid, 
+					))
+					->execute(); */
+			}
+		}
+	}
+}

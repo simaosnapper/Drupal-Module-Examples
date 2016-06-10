@@ -1,0 +1,87 @@
+<?php 
+
+function hmpgate_schema() {
+
+  $schema = array(); 
+
+  $schema['hmpgate'] = array(
+    'description' => 'Content Gate Settings',
+    'fields' => array(
+	  'id' => array(
+		'type' => 'serial',
+		'length' => 10,
+		'not null' => TRUE,
+	  ),
+	  'entity_id' => array(
+	  	'type' => 'int',
+	  	'length' => 10,
+	  	'not null' => TRUE,
+	  ),
+	  'type' => array(
+	  	'type' => 'varchar',
+	  	'length' => 128,
+	  	'not null' => TRUE,
+	  ),
+      'status' => array(
+        'type' => 'varchar',
+		'length' => 128,
+		'default' => 0,
+		'not null' => TRUE,
+      ),
+	),
+	'primary key' => array('id'),
+  );
+
+  $schema['hmpgate_roles'] = array(
+    'description' => 'Role Specific Gate Settings',
+    'fields' => array(
+	  'id' =>array(
+    	'type' => 'serial',
+    	'length' => 10,
+    	'not null' => TRUE,
+  	  ),
+  	  'entity_id' => array(
+  	  	'type' => 'int',
+  	  	'length' => 10,
+  	  	'not null' => FALSE, 
+  	  ),
+  	  'entity_name' => array(
+  	  	'type' => 'varchar',
+  	  	'length' => 128,
+  	  	'not null' => FALSE,
+  	  ),
+	  'type' => array(
+		'type' => 'varchar',
+		'length' => 255,
+		'not null' => TRUE,
+	  ),
+	  'rid' => array(
+		'type' => 'int',
+		'length' => 1,
+		'not null' => TRUE,
+	  ),
+	  'status' => array(
+	  	'type' => 'int',
+	  	'length' => '1',
+	  	'not null' => TRUE,
+	  ),
+	),
+	'primary key' => array('id'),
+  );
+
+  return $schema;
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function hmpgate_uninstall() {
+  $vars = db_select('variable')
+	->fields('variable', array('name'))
+	->condition('name', 'hmpgate_%', 'LIKE')
+	->execute()->fetchCol();
+
+  foreach($vars as $var) {
+	variable_del($var);
+  }
+}

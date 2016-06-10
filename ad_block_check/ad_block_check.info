@@ -1,0 +1,3 @@
+name = "Ad Block Checker"
+description = "Custom module for checking for ad block plus"
+core = 7.x

@@ -1,0 +1,108 @@
+<?php
+/*
+ *  Implements hook_menu()
+*/
+function hmp_branded_ad_regions_menu(){
+	$menu = array();
+
+	$menu['admin/structure/hmp_branded_ad_regions'] = array(
+		'title' => t('Branded ad regions'),
+		'access arguments' => array('administer content'),
+		'page callback' => 'drupal_get_form',
+		'page arguments' => array('hmp_branded_ad_regions_setup'),
+		'file' => 'hmp_branded_ad_regions.admin',
+	);
+
+	$menu['admin/structure/hmp_branded_ad_regions/settings'] = array(
+		'title' => t('Settings'),
+		'type' => MENU_LOCAL_TASK,
+		'access arguments' => array('administer content'),
+		'file' => 'hmp_branded_ad_regions.admin',
+		'page callback' => 'drupal_get_form',
+		'page arguments' => array('hmp_branded_ad_regions_settings'),
+	);
+
+	$menu['admin/structure/hmp_branded_ad_regions/region_setup'] = array(
+		'title' => t('Region Setup'),
+		'type' => MENU_DEFAULT_LOCAL_TASK,
+		'access arguments' => array('administer content'),
+	);
+
+	return $menu; 
+}
+
+/*
+ *
+ *  Implements hook_page_alter()
+ *  Determines the brand id either by the node or taxonomy term in the id.
+ *  If neither are set then the default brand ads are shown. 
+ *
+*/
+function hmp_branded_ad_regions_page_alter(&$page){
+	
+	if(arg(0) != 'admin'){
+		$vid = variable_get('hmp_branded_ad_regions_select_vocabulary', 0); 
+		$regions = variable_get('hmp_branded_ad_regions_select_regions', FALSE);
+		$default_brand_tid = variable_get('hmp_branded_ad_default_brand', FALSE);
+		 
+		if(isset($regions)){
+			//If node page get the node and determine the brand
+			if(arg(0) == 'node' && is_numeric(arg(1))){
+				$node = node_load(arg(1));
+				$tids = db_select('taxonomy_index','t')
+					->fields('t',array('tid'))
+					->condition('nid', arg(1), '=')
+					->execute()->fetchAssoc();
+				foreach($tids as $tid){
+					$term = taxonomy_term_load($tid);
+					if($term->vid == $vid){
+						$brand = $term; 
+						break; 
+					} 
+				}
+			}else{
+				//If this isn't a node page then we determine if the current path contains the 
+				//brand id if not the default brand is set
+				$path = current_path();
+				$elements = explode('/', $path);
+				foreach($elements as $element){
+					if(is_numeric($element)){
+						if($term = taxonomy_term_load($element) && $term->vid === $vid){
+							$brand = $term; 
+							break;  
+						}
+					}
+				}
+				if(!isset($brand)){
+					$brand = taxonomy_term_load($default_brand_tid); 
+				}
+			}
+			if(isset($brand)){
+				//Set the content per region
+				//We basically just prepend the $page variable with the content pulled per ad region
+				foreach($regions as $key=>$region){
+					if($key === $region){
+						//get the status for this region and brand
+						$status = variable_get('hmp_branded_ad_'.$key.'_brand_'.$brand->tid.'_status', FALSE);
+						//get the $content variable ready to push into the $page array
+						$content = array();
+						$content['#markup'] = '<div class="hmp_branded_ad_block">';
+						//If the status is not set to default or it is set to default and the current brand is the default brand
+						//append the $content variable with the content from the db else get the default brand content for this region 
+						if($status != 2  || $status === 2 && $brand->tid === $default_brand_tid){
+							$content['#markup'] .= variable_get('hmp_branded_ad_'.$key.'_brand_'.$brand->tid.'_ad_code',''); 
+						}else{ 
+							$default_brand_term = taxonomy_term_load($default_brand_tid);
+							$content['#markup'] .= variable_get('hmp_branded_ad_'.$key.'_brand_'.$default_brand_term->tid.'_ad_code','');  
+						}
+						$content['#markup'] .= '</div>'; 
+						//finally push the $content variable into the $page[$region], we always want 
+						//this ad on top so we always make the ad first in the array
+						array_unshift($page[$key], $content);
+					}
+				} 
+			}
+		}
+	}
+}
+

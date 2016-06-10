@@ -1,0 +1,10 @@
+name = HMP Gate
+description = Provides content gating controls per user and page views.
+core = 7.x
+configure = admin/config/content/hmpgate
+
+stylesheets[all][] = hmpgate.css
+
+scripts[] = hmpgate.js
+
+files[] = views_handlers/hmpgate_handler_field_node.inc

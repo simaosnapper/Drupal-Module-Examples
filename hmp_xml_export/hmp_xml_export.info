@@ -1,0 +1,5 @@
+name = HMP Custom XML Job Export
+description = HMP Health Job Connect Custom Export Module
+core = 7.x
+
+dependencies[] = scheduler

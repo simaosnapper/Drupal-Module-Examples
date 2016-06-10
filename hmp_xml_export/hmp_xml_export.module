@@ -1,0 +1,78 @@
+<?php
+/**
+ *
+ *  Implements hook_menu()
+ *
+*/
+function hmp_xml_export_menu(){
+	$menu = array();
+
+	$menu['hjc-xml-export/%'] = array(
+		'title' => t('Custom XML Export Page'),
+		'description' => t('Correctly formats xml for export into other HMP Drupal sites'),
+		'access callback' => TRUE,
+		'page arguments' => array(1),
+		'page callback' => 'hmp_xml_export_feedpage',
+		'type' => MENU_CALLBACK, 
+	);
+
+	return $menu;
+}
+
+/**
+ *
+ *  Formats xml feed
+ *	@param website = can be single or multiple taxonomy ids delimited by a comma
+ *	@param nids will populate after calling taxonomy_select_nodes() for each tid
+ *
+*/
+function hmp_xml_export_feedpage($website){
+	//if there are multiple websites seperated by a comma we explode them into an array
+	if(strpos($website, ',')){
+		$websites = explode(',',$website);
+	}else{
+		$websites = array($website); 
+	}
+	//$nids will be used when loading the nodes
+	$nids = array(); 
+	//we just add each node id if its tagged with one of the $websites
+	foreach($websites as $website){
+		$temp_ids = taxonomy_select_nodes($website);
+		foreach($temp_ids as $id){
+			array_push($nids,$id);
+		}
+	}
+	$output = '<?xml version="1.0"?>
+				<rss version="2.0">
+				    <channel>
+				    	<title><![CDATA[HMP Health Job Connect]]></title>
+				    	<link><![CDATA[http://healthjobconnect.com]]></link>
+				    	<description><![CDATA[Custom Health Job Connect Export]]></description>
+				    	<language><![CDATA[en-us]]></language>
+				    	<pubDate><![CDATA['.date('l, d F Y s:i:H').']]></pubDate>
+				    	<generator><![CDATA[Weblog Editor 2.0]]></generator>
+				    	<managingEditor><![CDATA[admin@hmpcommunications.com (Editor)]]></managingEditor>
+				    	<webMaster><![CDATA[admin@hmpcommunications.com (WebMaster)]]></webMaster>
+			  ';
+	//we load each node and parse the fields into the xml document
+	foreach($nids as $nid){
+		$node = node_load($nid);
+		if($node->unpublish_on > time()){
+			$output .= '
+						<item>
+						  <title><![CDATA['.$node->title.']]></title>
+						  <link><![CDATA['.$_SERVER['SERVER_NAME'].'/node/'.$node->nid.']]></link>
+						  <description><![CDATA['.$node->field_job_description['und'][0]['value'].']]></description>
+						  <pubDate><![CDATA['.$node->publish_on.']]></pubDate>
+						  <category>0</category>
+						  <guid><![CDATA['.$_SERVER['SERVER_NAME'].'/node/'.$node->nid.']]></guid>
+						</item>
+						';
+		} 
+	}
+	$output .= '</channel>
+			  </rss>'; 
+	header('Content-Type: application/xml; charset="ISO-8859-1"', TRUE);
+	print $output; 
+	exit; 
+}

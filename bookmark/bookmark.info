@@ -1,0 +1,7 @@
+name = Bookmark
+description = Allows Logged in User to Bookmark Pages of their choice.
+core = 7.x
+
+stylesheets[all][] = css/bookmark.css
+
+scripts[] = js/bookmark.js

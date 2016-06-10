@@ -1,0 +1,137 @@
+.bookmark_panel{
+	position: fixed;
+	right: 14%; 
+	background: #fff;
+	z-index: 999999999999;
+	width: 600px;
+	border: 1px solid #888;
+	box-shadow: 0px 5px 30px rgba(0,0,0,0.2);
+	max-height: 0;
+	overflow: hidden;
+	opacity: 0;
+	transition: all .4s;
+	-o-transition: all .4s;
+	-moz-transition: all .4s;
+	-webkit-transition: all .4s;
+}
+.bookmark_panel.open{
+	opacity: 1;
+	max-height: 1000px;
+	transition: all .4s;
+	-o-transition: all .4s;
+	-moz-transition: all .4s;
+	-webkit-transition: all .4s;
+}
+.bookmark_panel h2{
+	background: linear-gradient(to bottom, #963025 0%, #20110f 100%);
+	border-bottom: 1px solid #000;
+	margin: 0;
+	padding: 11px 9px 7px 9px;
+	color: #ffffff;
+	font-size: 21px;
+}
+.bookmark_panel h2 img{
+	position: relative;
+    top: -5px;
+    margin-right: 10px; 
+}
+#bookmark_box{
+	float: left;
+	width: 80%;
+	overflow: scroll;
+	min-height: 150px;
+	max-height: 275px; 
+	border-right: 2px solid #aaa;
+}
+ul#bookmarks{
+	list-style-type: none;
+	margin: 0;
+	padding: 12px;
+}
+ul#bookmarks li{
+	padding: 6px 0;
+	border-bottom: 1px dashed #666;
+	display: block;
+}
+ul#bookmarks li:last-child{
+	border-bottom: none;
+}
+.bookmark_link{
+	padding-right: 6px;
+	max-width: 85%;
+	float: left;
+}
+.delete_bookmark{
+	border-left: 2px solid #aaa;
+	float: right;
+	width: 15%;
+	height: 40px;
+	padding: 10px 0 0 10px;
+	font-weight: bold;
+}
+.bookmark_link a{
+	color: #95362C;
+	font-weight: bold;
+}
+.clear{
+	clear:both;
+}
+.bookmark_sidebar{
+	text-align: center;
+}
+.bookmark_sidebar .fa-user{
+	font-size: 64px;
+	color: #993328;
+	margin: 15px 0;
+}
+#user-options{
+	position: relative;
+}
+#bookmark_count{
+	   position: absolute;
+    top: -15px;
+    right: -10px;
+    background: orange;
+    padding: 1px;
+    border-radius: 50%;
+    height: 21px;
+    width: 21px;
+    text-align: center;
+}
+.page-node .main-content{
+	position: relative;
+}
+.bookmarker{
+	position: absolute;
+	top: -10px;
+	right: -8px;
+	width: 135px;
+	padding-top: 6px;
+	padding-right: 6px; 
+	opacity: .899; 
+	font-size: 10px; 
+}
+.fa-bookmark{
+	color:#922F24;
+	position:relative;
+	top:5px;
+}
+@media (max-width: 767px){
+	#bookmark_count{
+		top: -5px;
+		right: -25px; 
+	}
+	.bookmark_panel{
+		left: 0;
+		max-width: 100%;
+		top: 150px !important;  
+	}
+	#bookmark_box{
+		padding-right: 10px;
+		width: 74%;
+	}
+	ul#bookmarks{
+		max-width: 90%;
+		padding: 5px; 
+	}
+}

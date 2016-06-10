@@ -1,0 +1,361 @@
+<?
+/*
+	Ads.js is blocked by many major ad blockers.  Ads.js contains a variable set to true. block_check.js checks that variable to see if it is defined.  If the variable is not defined, it means ads.js was blocked by an ad blocker informing us that some form of ad blocker is enabled.  Using that information, we make an ajax request to ad_block_check_insert and insert a record saying wether or not ad blocker is enabled for that page view.
+*/
+
+/*
+**
+**  Implements hook_menu()
+**
+*/
+function ad_block_check_menu() {
+	$items = array();
+
+	$items['ad_block_request'] = array(
+		'title' => 'ad block check',
+		'access callback' => true,
+		'page callback' => 'ad_block_check_insert',
+	);
+
+	$items['admin/config/system/ad-block/dash'] = array(
+		'title' => 'Ad Block Percent',
+		'access callback' => true,
+		'page callback' => 'ad_block_check_dash',
+		'type' => MENU_NORMAL_ITEM, 
+	);
+
+	$items['admin/config/system/ad-block/dash/statistics'] = array(
+		'title' => t('Ad Block Percent'),
+		'type' => MENU_DEFAULT_LOCAL_TASK,
+	);
+
+	$items['admin/config/system/ad-block/dash/settings'] = array(
+		'title' => t('Ad Block Settings'),
+		'access arguments' => array('administer content'),
+		'page callback' => 'drupal_get_form',
+		'page arguments' => array('ad_block_admin_settings'),
+		'type' => MENU_LOCAL_TASK,
+	);
+
+	$items['ad-block/welcome'] = array(
+		'title' => 'Ad Block Page',
+		'access callback' => true,
+		'page callback' => 'ad_block_page',
+	);
+	return $items;
+}
+
+/*
+**
+**  Puts together the information from the settings page and outputs it to the screen
+**
+*/
+function ad_block_page() {
+	$output = '';
+
+	//Create the styles
+	$output .= '<style>
+				body{
+					background-color: '.variable_get('ad_block_background_color', '#000').';
+					display: flex;
+					display: -webkit-flex;
+					justify-content: space-around; 
+					align-items: center;
+					min-height: 100vh;
+				} 
+				#ad_block_anchor{
+					float: right; 
+				}
+				.ad_block_message{
+					text-align: center; 
+					padding:25px;
+					font-family: Arial, sans-serif; 
+					color: #fff; 
+					width: 600px;
+					max-width: 100%;';
+
+	//If the background image is set make it a style and close the styles tag else just clost the styles tag
+	$bg_fid = variable_get('ad_block_background_image', 0);
+	if($bg_fid != 0){
+		$bg_image = file_load($bg_fid); 
+		$output .= 'background: url("' . file_create_url($bg_image->uri) . '") no-repeat center; 
+				  background-size: contain; 
+				}</style>';
+	}else{
+		$output .= '}</style>';
+	}
+
+	//Start the markup
+	$output .= '<div class="ad_block_message">';
+	//get the settings message
+	$output .=  variable_get('ad_block_message','')['value']; 
+	//if the destination is set get it
+	$destination = (!isset($_GET['destination'])) ? '' : $_GET['destination']; 
+	//get the image button if one is set
+	$button = file_load(variable_get('ad_block_redirect_button',0)); 
+	//if the button is set create the parent anchor tag and its attributes from the destination url
+	if($button != 0){
+		$output .= '<a href="'.$destination.'" id="ad_block_anchor"><img src="' . file_create_url($button->uri) . '"></a>';
+	}
+	//close html
+	$output .= '</div>';
+
+	print $output; 
+}
+
+/*
+**
+**  Ad block settings page 
+**
+*/
+function ad_block_admin_settings($form, &$form_state){
+	$form = array();
+
+	//ajax returns message settings block
+	$form['ad_block_block_user'] = array(
+		'#type' => 'checkbox',
+		'#title' => t('Check this box to block users with ad block and display a block message'),
+		'#ajax' => array(
+			'wrapper' => 'ad_block_message',
+			'callback' => 'ad_block_show_admin_message',
+		),
+		'#default_value' => variable_get('ad_block_block_user', 0), 
+	);
+
+	$form['ad_block_admin_message'] = array(
+		'#type' => 'fieldset',
+		'#prefix' => '<div id="ad_block_message">',
+		'#suffix' => '</div>',
+	);
+
+	//if ad_block_block_user is checked show the message settings
+	if(isset($form_state['values']['ad_block_block_user']) && $form_state['values']['ad_block_block_user'] != 0 || variable_get('ad_block_block_user', 0) != 0  && !isset($form_state['values']['ad_block_block_user'])){
+
+		$form['ad_block_admin_message']['ad_block_message'] = array(
+			'#type' => 'text_format',
+			'#title' => t('Ad Block Message'),
+			'#default_value' => variable_get('ad_block_message','')['value'],
+			'#format' => variable_get('ad_block_message', '')['format'],
+			'#required' => TRUE, 
+		);
+
+		//color picker from built-in farbtastic drupal color addon
+		$form['ad_block_admin_message']['ad_block_background_color'] = array(
+		    '#type' => 'textfield',
+		    '#title' => t('Enter Ad Block Message Background Color:'),
+		    '#prefix' => '<div id="color_picker"></div>',
+		    '#required' => TRUE,
+		    '#default_value' => variable_get('ad_block_background_color','#000000'), 
+		    '#attributes' => array(
+		    	'id' => 'farbtastic-color-picker', 
+		    ),
+		    '#attached' => array(
+		        'library' => array(
+		            array('system', 'farbtastic'),
+		        ),
+		        'js' => array(drupal_get_path('module', 'ad_block_check') . '/js/color_mod.js'),
+		    ),
+		);
+
+		$form['ad_block_admin_message']['ad_block_redirect_button'] = array(
+			'#type' => 'managed_file',
+			'#title' => t('Button Image'),
+			'#default_value' => variable_get('ad_block_redirect_button',0),
+		);
+
+		$form['ad_block_admin_message']['ad_block_background_image'] = array(
+			'#type' => 'managed_file',
+			'#title' => t('Ad Block Background Image'),
+			'#default_value' => variable_get('ad_block_background_image', 0),
+		); 
+
+		$form['ad_block_admin_message']['preview_message'] = array(
+			'#type' => 'markup',
+			'#markup' => '<a href="/ad-block/welcome" target="_blank" class="action-item">Preview Ad Block Page</a>', 
+		);
+	}
+
+	$form['ad_block_block_submit'] = array(
+		'#type' => 'submit',
+		'#value' => t('Save Settings'), 
+	);
+	return $form; 
+}
+
+//ajax callback for message 
+function ad_block_show_admin_message($form, &$form_state){ 
+	return $form['ad_block_admin_message']; 
+}
+
+/*
+**  Implements hook_submit()
+*/
+function ad_block_admin_settings_submit($form, &$form_state){
+	//format the form values for easier use
+	$values = $form_state['values'];
+	//if the value is a field that we want to save handle it
+	//if the value is an image save it as a managed file
+	foreach($values as $key => $value){
+		if($key == 'ad_block_block_user' || $key == 'ad_block_message' || $key == 'ad_block_background_image' || $key == 'ad_block_background_color' || $key == 'ad_block_redirect_button'){ 
+			//if value is image handle it
+			if($key == 'ad_block_background_image' || $key == 'ad_block_redirect_button'){  
+				//if image field is not empty save the image else delete the saved image if there is one
+				if($value != 0){
+					$image = file_load($value);
+				    $image->status = FILE_STATUS_PERMANENT;  
+				    file_save($image); 
+				    file_move($image, 'public://');
+				    file_usage_add($image, 'ad_block_check', 'ad_block_image', $image->fid);
+				}else{
+					$image = variable_get($key, 0);
+					if($image != 0){
+						$image = file_load($image);
+						file_delete($image, TRUE);
+						file_usage_delete($image, 'ad_block_check', 'ad_block_image');
+					}
+				}
+			}
+			//save the value as a system variable the name will be $key and value $value
+			variable_set($key, $value);
+		}
+	}
+}
+
+/*
+	Submit records to the CAS dashboard
+*/
+function ad_block_check_cron() {
+	$data = ad_block_db_get_data();
+	$data['site_name'] = str_replace(' ','%20',variable_get('site_name', "Default site name"));
+	$data['site_name'] = str_replace("'",'',$data['site_name']);
+	$data['key'] = '4815162342';
+
+	$url = 'http://dash.hmpusers.com/api/ad_blocker/submit_record?key=' . $data['key'] . '&site_name=' . $data['site_name'] . '&blockers=' . $data['blockers'] . '&not_blocked=' . $data['not_blocked'];
+
+	//You can concatenate more tags to the data.
+	$options = array(
+	'method' => 'GET',
+	'headers' => array('Content-Type' => 'text/xml; charset=UTF-8'),
+	);
+	$result = drupal_http_request($url, $options);
+}
+
+/*
+	Fire off some js on page load
+*/
+function ad_block_check_init() {
+	global $user;
+	if(arg(0) != 'ad-block' && arg(0) != 'admin' && $user->uid != 1){
+		drupal_add_js('/sites/all/modules/custom/ad_block_check/ad/ads.js');
+		drupal_add_js('/sites/all/modules/custom/ad_block_check/js/block_check.js');
+	}
+}
+
+/*
+	Insert a view record, blocked or not and tell javascript whether there will be an ad block message
+*/
+function ad_block_check_insert() {
+	$value = $_GET['i'];
+	global $user;
+	if(!strpos($user->mail, '@hmp')) {
+		$query = db_insert('ad_block_checker')
+			->fields(array(
+				'uid' => $user->uid,
+				'blocker' => $value,
+				'timestamp' => time(),
+			))->execute();
+	}
+	//if there is a message tell the ajax call
+	if(variable_get('ad_block_block_user', 0) != 0){
+		print 1;
+	}else{
+		print 0; 
+	} 
+	exit(); 
+}
+
+/*
+	Local ad blocker dashboard, for local reporting
+*/
+function ad_block_check_dash() {
+
+	$data = ad_block_db_get_data();
+
+	$output = '
+	<style>.left,.middle,.right {
+		display: inline-block;
+		width: 155px;
+	}
+	.middle {
+		background: #fff;
+		border: 2px solid #afafaf;
+		height: 22px;
+		width: 200px;
+		margin: 0 25px;
+	}
+	.middle .progress-bar {
+		background: red;
+		height: 22px;
+		width: ' . $data['blockers_percent'] . '%;
+		overflow: hidden;
+	}</style>
+	';
+	$output .=  '<div class="left">Ad Blocked Views: <b>' . $data['blockers'] . '</b> (' . $data['blockers_percent'] . '%)</div>';
+	$output .= '<div class="middle"><div class="progress-bar"></div></div>';
+	$output .= '<div class="right">Standard Views: <b>' . $data['not_blocked'] . '</b> (' . $data['not_percent'] . '%)</div>';
+
+	return $output;
+}
+
+/*
+	Install the schema on module install
+*/
+function ad_block_check_schema() {
+	$schema['ad_block_checker'] = array(
+		'description' => 'The table to record blocked ads',
+		'fields' => array(
+			'id'  => array(
+		        'description' => 'The primary identifier for a node.',
+		        'type' => 'serial',
+		        'unsigned' => TRUE,
+		        'not null' => TRUE,
+		      ),
+			'uid' => array(
+		        'type' => 'int',
+		        'unsigned' => TRUE,
+		        'not null' => TRUE,
+		      ),
+			'blocker' => array(
+		        'type' => 'int',
+		        'unsigned' => TRUE,
+		        'not null' => TRUE,
+		      ),
+			'timestamp' => array(
+		        'type' => 'int',
+		        'size' => 'big',
+		        'unsigned' => TRUE,
+		        'not null' => TRUE,
+		      ),
+		),
+		'primary key' => array('id'),
+	);
+	return $schema;
+}
+
+/*
+	Get data from the ad_block table
+*/
+function ad_block_db_get_data() {
+	$data = array();
+
+	$total = db_select('ad_block_checker','a')->fields('a',array('id'))->condition('a.uid','1','!=')->execute();
+	$data['total'] = $total->rowCount();
+	$blockers = db_select('ad_block_checker','a')->fields('a',array('id'))->condition('a.uid','1','!=')->condition('a.blocker',1,'=')->execute();
+	$data['blockers'] = $blockers->rowCount();
+	$not_blocked = db_select('ad_block_checker','a')->fields('a',array('id'))->condition('a.uid','1','!=')->condition('a.blocker',0,'=')->execute();
+	$data['not_blocked'] = $not_blocked->rowCount();
+
+	$data['blockers_percent'] = ($data['blockers']/$data['total']) * 100;
+	$data['not_percent'] = 100 - $data['blockers_percent'];
+	return $data;
+}

@@ -1,0 +1,127 @@
+<?php 
+
+//Main settings form
+function hmp_branded_ad_regions_settings($form, &$form_state){
+	$form = array(); 
+	//Get the current main theme
+	$main_theme = variable_get('theme_default');
+	//Get a lightweight list of regions based on the default theme
+	$regions = system_region_list($main_theme);
+	$vocabularies = taxonomy_get_vocabularies();
+	$vocabulary_select = array(); 
+	//set the vocabularies up to be put into a select form
+	foreach($vocabularies as $key=>$vocabulary){
+		$vocabulary_select[$key] = $vocabulary->name; 
+	}
+
+	//Select the branding vocabulary
+	//Ajax returns the vocab tree to set a default brand
+	$form['hmp_branded_ad_regions_select_vocabulary'] = array(
+		'#type' => 'select',
+		'#title' => t('Select a vocabulary to brand with'),
+		'#required' => TRUE,
+		'#options' => $vocabulary_select, 
+		'#default_value' => variable_get('hmp_branded_ad_regions_select_vocabulary', 0), 
+		'#ajax' => array(
+			'callback' => 'hmp_branded_ad_regions_ajax_callback',
+			'wrapper' => 'hmp_branded_ad_regions_select_default',
+		),
+	);
+
+	$form['hmp_branded_ad_select_default'] = array(
+		'#type' => 'fieldset',
+		'#attributes' => array(
+			'id' => 'hmp_branded_ad_regions_select_default',
+		),
+	);
+
+	//Just shows the tree for the current branding vocabulary
+	if(isset($form_state['triggering_element']) || $form['hmp_branded_ad_regions_select_vocabulary']['#default_value'] != 0){
+		$vocab_id = (isset($form_state['triggering_element']['#value'])) ? $form_state['triggering_element']['#value'] : $form['hmp_branded_ad_regions_select_vocabulary']['#default_value'];
+		//pull the terms 
+		$terms = taxonomy_get_tree($vocab_id);
+		$select_terms = array();
+		//Get the terms ready for a select form
+		foreach($terms as $term){
+			$select_terms[$term->tid] = $term->name; 
+		}
+		$form['hmp_branded_ad_select_default']['hmp_branded_ad_default_brand'] = array(
+			'#type' => 'select',
+			'#options' => $select_terms,
+			'#title' => t('Select default brand to fallback on'), 
+			'#default_value' => variable_get('hmp_branded_ad_default_brand', 0), 
+		);
+	}
+
+	$form['hmp_branded_ad_regions_select_regions'] = array(
+		'#type' => 'checkboxes',
+		'#title' => t('Select Regions'),
+		'#options' => $regions,
+		'#default_value' => variable_get('hmp_branded_ad_regions_select_regions', array()),
+	);
+
+	//save all variables in the system variables table (variables)
+	return system_settings_form($form); 
+}
+
+//Regions form 
+//Basically allows us to put ad code in any region we want based on branding
+function hmp_branded_ad_regions_setup($form, &$form_state){
+	$form = array(); 
+	//Get the current branding vocabulary
+	$vocabulary_id = variable_get('hmp_branded_ad_regions_select_vocabulary', FALSE);
+	//get the vocabulary tree
+	$brands = taxonomy_get_tree($vocabulary_id);
+	if(isset($vocabulary_id)){
+		//get all the regions we want ad code in
+		$regions = variable_get('hmp_branded_ad_regions_select_regions', FALSE);
+		if(isset($regions)){
+			//print each brand form out as a fieldset and do the same for each region within the current brand
+			foreach($brands as $brand){
+				$form['hmp_branded_ad_'.$brand->tid] = array(
+					'#type' => 'fieldset',
+					'#title' => $brand->name,
+					'#collapsible' => TRUE,
+					'#collapsed' => TRUE, 
+				);
+
+				foreach($regions as $key=>$region){
+					if($key === $region){
+						//fieldset region wrapper
+						$form['hmp_branded_ad_'.$brand->tid]['hmp_branded_ad_brand'.$key] = array(
+							'#type' => 'fieldset',
+							'#title' => $key, 
+							'#collapsible' => TRUE,
+							'#collapsed' => TRUE, 
+						);
+
+						//settings enabled or default 
+						$form['hmp_branded_ad_'.$brand->tid]['hmp_branded_ad_brand'.$key]['hmp_branded_ad_'.$key.'_brand_'.$brand->tid.'_status'] = array(
+							'#type' => 'radios',
+							'#title' => t('Set Status'),
+							'#options' => array(
+									1 => t('Enabled'),
+									2 => t('Default'),
+								),
+							'#default_value' => variable_get('hmp_branded_ad_'.$key.'_brand_'.$brand->tid.'_status', 2),
+						);
+
+						//ad code for each region in the current brand
+						$form['hmp_branded_ad_'.$brand->tid]['hmp_branded_ad_brand'.$key]['hmp_branded_ad_'.$key.'_brand_'.$brand->tid.'_ad_code'] = array(
+							'#type' => 'textarea',
+							'#title' => t('Ad Code'),
+							'#default_value' => variable_get('hmp_branded_ad_'.$key.'_brand_'.$brand->tid.'_ad_code',''), 
+						);
+					}
+				}
+			} 
+		}
+	}
+
+	return system_settings_form($form);
+}
+
+//returns the default form selector
+function hmp_branded_ad_regions_ajax_callback($form, &$form_state){
+	return $form['hmp_branded_ad_select_default']; 
+}

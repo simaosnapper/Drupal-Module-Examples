@@ -1,0 +1,641 @@
+<?php
+
+
+/*
+**
+**  Admin Settings Page:  We just let them set whether or not 
+**  this site will have multpile subscription forms (portals)
+**
+*/
+function hmp_subscribe_forms_settings(){
+  $form = array();
+
+  $form['hmp_subscribe_forms_multiple_forms'] = array(
+    '#type' => 'checkbox',
+    '#default_value' => variable_get('hmp_subscribe_forms_multiple_forms', 0),
+    '#title' => t('Check this box if you want multiple forms on one page'),
+    '#description' => t('This is for portals and sites that will have more than one subscribtion form.  Otherwise you can leave this unchecked.'),
+    '#return_value' => 1, 
+  );
+
+  $vocabularies = taxonomy_get_vocabularies();
+  $options = array();
+  foreach($vocabularies as $key => $vocabulary){
+    $options[$key] = $vocabulary->name; 
+  }
+
+  $form['hmp_subscribe_forms_tagging_vocabulary'] = array(
+    '#type' => 'select',
+    '#title' => t('Select the vocabulary you want to tag with (if any)'),
+    '#options' => $options, 
+    '#default_value' => variable_get('hmp_subscribe_forms_tagging_vocabulary', 'Select'),
+  );
+
+  return system_settings_form($form); 
+}
+
+/*
+**
+**  Edit Forms Page, pulls the form_id from the url 
+**  
+*/
+function hmp_subscribe_forms_editform($form, &$form_state, $form_id){
+  
+  //Pull the current form from @form_id into an assoc array
+  $db_form = db_select('hmp_subscribe_forms', 'h')
+    ->fields('h')
+    ->condition('form_id', $form_id, '=')
+    ->execute()
+    ->fetchAssoc(); 
+
+  $form['edit_forms'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Edit ' .$db_form['form_name']. ' Form', 
+  );
+
+  //Only give this option if the multiple forms box is checked in settings
+  if(variable_get('hmp_subscribe_forms_multiple_forms', 0) === 1){
+    $form['edit_forms']['form_multiple'] = array(
+      '#title' => t('Multiple Forms'), 
+      '#type' => 'checkbox', 
+      '#description' => t('Check this box if you want this form to appear with other forms checked with this box'),
+      '#default_value' => $db_form['form_multiple'],
+    );
+  }
+
+  //Hidden form value for $form_state in the submit function
+  $form['edit_forms']['form_id'] = array(
+    '#type' => 'hidden',
+    '#value' => $form_id,
+  );
+
+  if(variable_get('hmp_subscribe_forms_tagging_vocabulary', 0) != 0){
+    $tree = taxonomy_get_tree(variable_get('hmp_subscribe_forms_tagging_vocabulary', 0));
+  
+    $options = array();
+    foreach($tree as $term){
+      $options[$term->tid] = $term->name; 
+    }
+
+    $form['edit_forms']['taxonomy_tag'] = array(
+      '#title' => t('Brand Tag'),
+      '#type' => 'select',
+      '#options' => $options,
+      '#default_value' => $db_form['form_tag'], 
+    );
+  }
+
+  $form['edit_forms']['form_name'] = array(
+    '#title' => t('Rename the Form'),
+    '#description' => t('HINT: No need to select a brand that already has a form'),
+    '#type' => 'textfield',
+    '#default_value' => $db_form['form_name'],
+  );
+
+  $form['edit_forms']['form_image'] = array(
+    '#type' => 'managed_file',
+    '#name' => 'files[form_img]',
+    '#title' => t('Form Image'),
+    '#default_value' => ($db_form['form_image'] != 0) ? $db_form['form_image'] : 0, 
+  );
+
+  $form['edit_forms']['form_body'] = array(
+    '#title' => t('Form Body'),
+    '#type' => 'text_format',
+    '#default_value' => $db_form['form_body'],
+    '#format' => $db_form['form_body_format'],
+  );
+  
+  //Decode the json object and turn it into an array if options are set for this form
+  $options = (!empty($db_form['form_options'])) ? get_object_vars(json_decode($db_form['form_options'])) : '';
+  
+  //Set Number of options based on either how many options were set previously for this form
+  //$form_state['num_options'] will be incremented in the #submit functions 
+  if(!isset($form_state['num_options'])){
+    $form_state['num_options'] = (!empty($db_form['form_options'])) ? count($options) : 1; 
+  }
+
+  $form['edit_forms']['form_options'] = array(
+    '#title' => t('Form Options'),
+    '#description' => t('Separate each option with a new line'),
+    '#type' => 'container',
+    '#prefix' => '<div id="form_options_ajax_container">',
+    '#suffix' => '</div>',
+    '#tree' => TRUE, 
+  );
+
+  //This form rebuilds each time a link is added or subtracted.  $form_state['#rebuild'] must 
+  //be set each time for the complete form to rebuild.
+  if($form_state['num_options'] > 0){
+    for($i=1;$i<=$form_state['num_options'];$i++){
+      //Get the current options to parse into the form
+      $option = $options[$i];
+
+      //The container that will be rebuilt on each ajax call
+      $form['edit_forms']['form_options'][$i]['options_container'] = array(
+        '#type' => 'fieldset',
+        '#prefix' => '<div id="'.$i.'_container">',
+        '#suffix' => '</div>', 
+        '#title' => 'Link/Options ' . $i, 
+        '#collapsible' => TRUE,
+      );
+
+      //Gives the option to make this link a select or radio in the user form
+      $form['edit_forms']['form_options'][$i]['options_container']['type'] = array(
+        '#type' => 'radios',
+        '#title' => t('Type of Option'),
+        '#description' => t('Select where you want this option to appear in the subscribtion form. Radio option links will always take precedence over select option links.'),
+        '#options' => array(
+          1 => 'Select',
+          2 => 'Radio',
+        ),
+        '#default_value' => isset($option->type) ? $option->type : 1, 
+      );
+
+      //The link these options will redirect to when selected
+      $form['edit_forms']['form_options'][$i]['options_container']['link'] = array(
+        '#title' => 'Link ' . $i,
+        '#descritpion' => t('Enter the link you\'d like the form to redirect to'),
+        '#type' => 'textfield',
+        '#default_value' => isset($option->link) ? $option->link : '',
+      );
+
+      //The options seperated by returns that will fill the select and radio options
+      $form['edit_forms']['form_options'][$i]['options_container']['options'] = array(
+        '#title' => t('Form link ' . $i . ' options each seperated by a new line'),
+        '#type' => 'textarea',
+        '#default_value' => isset($option->options) ? $option->options : '', 
+      );
+    }
+  }
+  
+  //increments $form_state['num_options'] and rebuilds the form accordingly
+  $form['edit_forms']['form_options']['add_options'] = array(
+    '#type' => 'submit',
+    '#submit' => array('hmp_subscribe_forms_add_options'),
+    '#value' => t('Add another link'), 
+    '#ajax' => array(
+      'callback' => 'hmp_subscribe_forms_ajax_callback_edit_forms', 
+      'wrapper' => 'form_options_ajax_container', 
+    ),
+    '#limit_validation_errors' => array(),
+  );
+
+  //Same thing as previous button but decrements the form
+  if($form_state['num_options'] > 1){
+    $form['edit_forms']['form_options']['delete_options'] = array(
+      '#type' => 'submit',
+      '#submit' => array('hmp_subscribe_forms_delete_options'),
+      '#value' => t('Delete a link'), 
+      '#ajax' => array(
+        'callback' => 'hmp_subscribe_forms_ajax_callback_edit_forms', 
+        'wrapper' => 'form_options_ajax_container', 
+      ),
+      '#limit_validation_errors' => array(),
+    );
+  }
+
+  //The order the forms will appear
+  $form['edit_forms']['weight'] = array(
+    '#title' => t('Weight'),
+    '#description' => t('The order by which the forms will appear on the subscribion page.'),
+    '#type' => 'textfield',
+    '#default_value' => $db_form['form_weight'], 
+  );
+
+  //E-news link
+  $form['edit_forms']['e_news'] = array(
+    '#type' => 'textfield',
+    '#title' => t('E-news link'),
+    '#description' => t('Enter the link you want the e-news button to link to.  This can be on or off the current site.'),
+    '#default_value' =>  $db_form['form_enews_link'], 
+  );
+
+  //Path alias will be saved in the url_aliases table
+  $form['edit_forms']['path_alias'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Path Alias (All spaces must be seperated by a - )'), 
+    '#default_value' => $db_form['path_alias'],
+    '#required' => TRUE, 
+  );
+
+  $form['edit_forms']['edit-save'] = array(
+    '#type' => 'submit',
+    '#value' => t('Save'), 
+  );
+
+  $form['edit_forms']['edit-delete'] = array(
+    '#type' => 'submit',
+    '#value' => t('Delete'), 
+  );
+
+  return $form; 
+}
+
+/**
+**
+**  Implements hook_submit()
+**
+*/
+function hmp_subscribe_forms_editform_submit($form, $form_state){
+  //makes the array easier to access and write
+  $values = $form_state['values'];
+
+  //if the save button is clicked save the form else go to the confirm delete page
+  if(strtolower($form_state['clicked_button']['#value'])  == 'save'){
+    
+    //Here we only save the image if the image has been changed.  No sense in setting
+    //These values again if we don't need to
+    if(!empty($values['form_image'])){
+      $image = file_load($values['form_image']); 
+      file_usage_add($image, 'hmp_subscribe_forms', 'subscribe_form_image', $image->fid);
+      $image->status = FILE_STATUS_PERMANENT; 
+      file_save($image);
+      file_move($image, 'public://', FILE_EXISTS_REPLACE);
+    }else{
+      $db_image = db_select('hmp_subscribe_forms', 'h')
+      ->fields('h', array('form_image'))
+      ->condition('form_id',$values['form_id'])
+      ->execute()
+      ->fetchField();
+      if(!empty($db_image) && $db_image != 0){
+        $image = file_load($db_image); 
+        file_usage_delete($image, 'hmp_subscribe_forms', 'subscribe_form_image');
+        file_delete($image);
+      }
+    }
+
+    //preps the options parameters for json encoding.  Basically just turns everything into an array.
+    $options = array(); 
+    foreach($values['form_options'] as $key => $value){
+      if(is_numeric($key)){
+        $options[$key] = $value['options_container'];
+      }
+    }
+    //encode the options
+    $options = json_encode($options);
+
+    //save the form
+    $success = db_update('hmp_subscribe_forms')
+      ->fields(array(
+        'form_multiple' => $values['form_multiple'], 
+        'form_tag' => $values['taxonomy_tag'],
+        'form_name' => $values['form_name'], 
+        'form_body' => $values['form_body']['value'],
+        'form_body_format' => $values['form_body']['format'],
+        'form_options' => $options,
+        'form_weight' => intval($values['weight']),
+        'form_image' => $values['form_image'],
+        'form_enews_link' => $values['e_news'], 
+        'path_alias' => $values['path_alias'], 
+      ))
+      ->condition('form_id',$values['form_id'],'=') 
+      ->execute(); 
+
+    //save the alias
+    db_update('url_alias')
+      ->fields(array(
+        'alias' => $values['path_alias'], 
+      ))
+      ->condition('source', 'subscribe/'.$values['form_id'], '=')
+      ->execute(); 
+
+  
+    if($success){
+      drupal_set_message('Subscription Form Saved Successfully!');
+    }else{
+      drupal_set_message('Nothing changed, please try again');
+    }
+      drupal_goto('admin/content/hmp-subscribe-forms');
+  }else{ 
+    //confirm delete page
+    drupal_goto('admin/content/hmp-subscribe-forms/delete_form/' .$values['form_id'] . '/' . $values['form_name']); 
+  } 
+}
+
+/**
+**
+**  Sets up the confirm delete form page
+**  @param $form_name just lets the user know which form will be deleted
+**  @param $form_id to know send the argument to the register path
+**
+**/
+function hmp_subscribe_forms_deleteform($form, &$form_state, $form_id, $form_name){
+  $form = array();
+  $form['id'] = array(
+    '#type' => 'value',
+    '#value' => $form_id,
+  );
+
+  return confirm_form(
+    $form,
+    t('Are you sure you want to delete the ' . $form_name . ' form?'),
+    'admin/content/hmp-subscribe-forms/edit_form/' .$form_id,
+    t('This action cannot be undone'),
+    t('Delete'),
+    t('Cancel')
+  );
+}
+
+/**
+**
+**  Implements hook_submit()
+**  Simply deletes the form and alias connected to it
+**
+**/
+
+function hmp_subscribe_forms_deleteform_submit($form, &$form_state){
+  if(isset($form_state['values']['id'])){
+    $success = db_delete('hmp_subscribe_forms')
+      ->condition('form_id', $form_state['values']['id'], '=')
+      ->execute();
+
+    db_delete('url_alias')
+      ->condition('source', 'subscribe/'.$form_state['values']['id'], '=')
+      ->execute();
+
+      if($success){
+        drupal_set_message('That form was deleted successfully');
+    }else{
+      drupal_set_message('Something went wrong, please try again');
+    }
+    drupal_goto('admin/content/hmp-subscribe-forms');
+  }
+}
+
+/**
+**
+**  This form just lets user select which form to edit and redirect to the edit form page
+**
+**/
+function hmp_subscribe_forms_selectforms($form, &$form_state){
+  //Selects the current hmp subscription forms
+  $db_forms = hmp_subscribe_forms_get_forms(); 
+  $forms = array();
+  foreach($db_forms as $db_form){
+    $forms[$db_form->form_id] = $db_form->form_name; 
+  }
+
+  $form['select_form'] = array(
+    '#type' => 'select',
+    '#title' => t('Select the form you want to edit'),
+    '#options' => $forms,
+    '#empty_value' => 'Select', 
+  );
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Edit Form'), 
+  );
+
+  return $form; 
+}
+
+/**
+**
+**  Implements hook_submit()
+**  Catches the form id and redirects to the edit form page
+**
+**/
+function hmp_subscribe_forms_selectforms_submit($form, &$form_state){
+  $id = $form_state['values']['select_form'];  
+  drupal_goto('admin/content/hmp-subscribe-forms/edit_form/'.$id);
+}
+
+
+/**
+**
+**  The create form page.  Most of this is very similar to the edit form page except default values are not set.
+**
+**/
+function hmp_subscribe_forms_createforms($form, &$form_state){
+  	$form = array();
+
+    if(variable_get('hmp_subscribe_forms_multiple_forms', 0) === 1){
+      $form['edit_forms']['form_multiple'] = array(
+        '#title' => t('Multiple Forms'), 
+        '#type' => 'checkbox', 
+        '#description' => t('Check this box if you want this form to appear with other forms checked with this box'),
+        '#default_value' => $db_form['form_multiple'],
+      );
+    }
+
+
+  if(variable_get('hmp_subscribe_forms_tagging_vocabulary', 0) != 0){
+    $tree = taxonomy_get_tree(variable_get('hmp_subscribe_forms_tagging_vocabulary', 0));
+
+    $options = array();
+    foreach($tree as $term){
+      $options[$term->tid] = $term->name; 
+    }
+
+    $form['add_brand_form']['taxonomy_tag'] = array(
+      '#title' => t('Brand Tag'),
+      '#type' => 'select',
+      '#options' => $options,
+      '#default_value' => 'Select', 
+    );
+  }
+
+
+    $form['add_brand_form']['form_name'] = array(
+      '#title' => t('Name This Form'),
+      '#type' => 'textfield',
+    );
+
+    $form['add_brand_form']['form_image'] = array(
+      '#type' => 'managed_file',
+      '#title' => t('Form Image'),
+      '#requried' => TRUE, 
+    );
+
+  	$form['add_brand_form']['form_body'] = array(
+  		'#title' => t('Form Body'),
+  		'#type' => 'text_format',
+  	);
+    
+    if(!isset($form_state['num_options'])){
+      $form_state['num_options'] = 1; 
+    }
+
+    $form['add_brand_form']['form_options'] = array(
+      '#title' => t('Form Options'),
+      '#description' => t('Separate each option with a new line. Radio option links will always take precedence over select option links.'),
+      '#type' => 'container',
+      '#prefix' => '<div id="form_options_ajax_container">',
+      '#suffix' => '</div>',
+      '#tree' => TRUE, 
+    );
+
+    for($i=1;$i<=$form_state['num_options'];$i++){
+
+      $form['add_brand_form']['form_options'][$i]['options_container'] = array(
+        '#type' => 'fieldset',
+        '#prefix' => '<div id="'.$i.'_container">',
+        '#suffix' => '</div>', 
+        '#title' => 'Link/Options ' . $i, 
+        '#collapsible' => TRUE,
+      );
+
+      $form['add_brand_form']['form_options'][$i]['options_container']['type'] = array(
+        '#type' => 'radios',
+        '#title' => t('Type of Option'),
+        '#description' => t('Select where you want this option to appear in the subscribtion form'),
+        '#options' => array(
+          1 => 'Select',
+          2 => 'Radio',
+        ),
+        '#default_value' => 1, 
+      );
+
+      $form['add_brand_form']['form_options'][$i]['options_container']['link'] = array(
+        '#title' => 'Link ' . $i,
+        '#descritpion' => t('Enter the link you\'d like the form to redirect to'),
+        '#type' => 'textfield',
+        '#description' => t('The link this option sends you to')
+      );
+
+      $form['add_brand_form']['form_options'][$i]['options_container']['options'] = array(
+        '#title' => t('Link ' . $i . ' option text'),
+        '#type' => 'textarea',
+        '#description' => t('The text you want the user to see for this link (seperate each option with a new line if you want multiple options to go to this link)'), 
+      );
+
+    }
+
+    $form['add_brand_form']['form_options']['add_options'] = array(
+      '#type' => 'submit',
+      '#submit' => array('hmp_subscribe_forms_add_options'),
+      '#value' => t('Add another link'), 
+      '#ajax' => array(
+        'callback' => 'hmp_subscribe_forms_ajax_callback', 
+        'wrapper' => 'form_options_ajax_container', 
+      ),
+      '#limit_validation_errors' => array(),
+    );
+
+    if($form_state['num_options'] > 1){
+      $form['add_brand_form']['form_options']['delete_options'] = array(
+        '#type' => 'submit',
+        '#submit' => array('hmp_subscribe_forms_delete_options'),
+        '#value' => t('Delete a link'), 
+        '#ajax' => array(
+          'callback' => 'hmp_subscribe_forms_ajax_callback', 
+          'wrapper' => 'form_options_ajax_container', 
+        ),
+        '#limit_validation_errors' => array(),
+      );
+    }
+
+    $form['add_brand_form']['weight'] = array(
+      '#title' => t('Weight'),
+      '#description' => t('The order by which the forms will appear on the subscribion page.'),
+      '#type' => 'textfield',
+    );
+
+    $form['add_brand_form']['e_news'] = array(
+      '#type' => 'textfield',
+      '#title' => t('E-news link'),
+      '#description' => t('Enter the link you want the e-news button to link to.  This can be on or off the current site.'), 
+    );
+
+    $form['add_brand_form']['path_alias'] = array(
+      '#title' => t('Enter path alias. All spaces must be seperated by a - and no leading slash. (example: subscribe/altc)'),
+      '#type' => 'textfield',
+      '#required' => TRUE,
+    );
+
+    $form['add_brand_form']['submit'] = array(
+      '#type' => 'submit',
+      '#value' => t('Submit New Form'),
+    );
+
+  	return $form; 
+}
+
+/**
+**
+**  Implements hook_submit()
+**  Saves the new form to the database
+**  Same as editforms_submit but creates a new form
+**  By the way, to whoever edits this code in the future:  I could have consolidated both the edit form and create forms
+**  but I didn't due to lack of planning, scope creep, and not wanting to at the end since it works.  
+**  Moral of the story: Plan ahead and know what you want before you start coding.....  :D
+**
+**/
+function hmp_subscribe_forms_createforms_submit($form, &$form_state){
+  $values = $form_state['values']; 
+
+  $options = array(); 
+  foreach($values['form_options'] as $key => $value){
+    if(is_numeric($key)){
+      $options[$key] = $value['options_container'];
+    }
+  }
+  $options = json_encode($options);
+
+  $success = db_insert('hmp_subscribe_forms')
+    ->fields(array(
+      'form_multiple' => $values['form_multiple'],  
+      'form_tag' => $values['taxonomy_tag'], 
+      'form_name' => $values['form_name'], 
+      'form_image' => $values['form_image'], 
+      'form_body' => $values['form_body']['value'],
+      'form_body_format' => $values['form_body']['format'],
+      'form_options' => $options,
+      'form_weight' => intval($values['weight']), 
+      'form_enews_link' => $values['e_news'], 
+      'path_alias' => $values['path_alias'], 
+  )); 
+
+  if(!empty($values['form_image'])){
+    $image = file_load($values['form_image']); 
+    file_usage_add($image, 'hmp_subscribe_forms', 'subscribe_form_image', $image->fid);
+    $image->status = FILE_STATUS_PERMANENT; 
+    //add the image to the insert query
+    $success->fields(array('form_image' => $image->fid));
+    file_save($image);
+    file_move($image, 'public://', FILE_EXISTS_REPLACE);
+  }
+  $success->execute(); 
+
+  $form_id = db_select('hmp_subscribe_forms', 'h')
+    ->fields('h', array('form_id'))
+    ->condition('form_name',$values['form_name'], '=')
+    ->execute()
+    ->fetchField();
+
+  if($success){
+    $path = array();
+    $path['source'] = 'subscribe/' . $form_id;
+    $path['alias'] = $values['path_alias']; 
+    path_save($path); 
+    drupal_set_message($values['form_name'] . ' Has been saved successfully');
+  }else{
+    drupal_set_message('Something went wrong, please try again'); 
+  }
+}
+
+//Simple ajax callback to return the create form options after $form_state['num_options'] is either incremented or decremented
+function hmp_subscribe_forms_ajax_callback($form, &$form_state){ 
+  return $form['add_brand_form']['form_options'];
+}
+
+//Same as previous but for the edit form page
+function hmp_subscribe_forms_ajax_callback_edit_forms($form, &$form_state){ 
+  return $form['edit_forms']['form_options'];
+}
+
+//increments $form_state['num_options'] for both edit and create forms
+function hmp_subscribe_forms_add_options($form, &$form_state){
+  $form_state['num_options']++;
+  $form_state['rebuild'] = TRUE; 
+}
+
+//decrements $form_state['num_options'] for both edit and create forms
+function hmp_subscribe_forms_delete_options($form, &$form_state){
+  if($form_state['num_options'] > 1){
+    $form_state['num_options']--;
+  }
+  $form_state['rebuild'] = TRUE; 
+}

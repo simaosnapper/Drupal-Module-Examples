@@ -1,0 +1,5 @@
+name = Subscribe Form
+description = Create subscribe forms for each brand.
+core = 7.x
+
+scripts[] = hmp_subscribe_forms.js

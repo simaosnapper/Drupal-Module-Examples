@@ -1,0 +1,267 @@
+<?php
+
+function bookmark_menu(){
+	$items = array(); 
+
+	$items['bookmark/delete/%'] = array(
+		'title' => 'Delete a Bookmark',
+		'description' => 'Ajax Delete Bookmark from DB',
+		'page callback' => 'bookmark_delete_bookmark',
+		'page arguments' => array(2),
+		'access callback' => 'user_is_logged_in',
+		'type' => MENU_CALLBACK,
+	);
+
+	$items['bookmark/add/%'] = array(
+		'title' => 'Add a Bookmark',
+		'description' => 'Ajax Add a Bookmark',
+		'page callback' => 'bookmark_add_bookmark',
+		'page arguments' => array(2),
+		'access callback' => 'user_is_logged_in',
+		'type' => MENU_CALLBACK, 
+	);
+
+	return $items; 
+
+}
+
+/*
+*	Implements hook_block_info()
+*   Creates Bookmark Block to be processed further
+*/
+
+function bookmark_block_info(){
+	$blocks = array(); 
+
+	$blocks['bookmarks_panel'] = array(
+		'info' => t('Bookmarks Panel'),
+	);
+
+	return $blocks; 
+}
+
+/*
+*	Implements hook_block_view()
+*   Sets Info and contents
+*   Pulls contents from bookmark block contents
+*/
+
+function bookmark_block_view($delta = ''){
+	$block = array();
+
+	switch ($delta) {
+		case 'bookmarks_panel': 
+		  $block['subject'] = t('Bookmarks Panel');
+		  $block['content'] = bookmark_block_contents($delta); 
+		  break;
+	}
+
+	return $block;
+}
+
+/*
+*   Creates Contents for custom Bookmark Block
+*/
+function bookmark_block_contents($delta){
+	
+	$output = '';
+	if(user_is_logged_in()){
+		switch ($delta){
+			case 'bookmarks_panel':
+			$output .= '<div class="bookmark_panel">';
+			$output .= '<h2><img src="/sites/all/themes/con_2016/img/consult_small.png"> BOOKMARKS<span class="close fa fa-times"></span></h2>';
+			$output .= '<div id="bookmark_error"></div>';
+			$output .= '<div id="bookmark_box">'; 
+			$bookmarks = get_bookmarks(); 
+			$output .= $bookmarks;
+			$output .= '</div>';
+			$output .= '<div class="bookmark_sidebar"><span class="fa fa-user"></span>';
+			$output .= '<div class="bookmark_user">';
+			$output .= '<div><strong>' . l('Logout', '/user/logout') . '</strong></div>';
+			$output .= '<div><strong>' . l('Edit Account', '/user') . '</strong></div>';
+			$output .= '</div></div>';
+		}
+	}
+
+	return $output; 
+}
+
+/* 
+*    Gets bookmarks per user from database, formats the html, and returns them
+*/
+function get_bookmarks(){ 
+	global $user;
+	if(user_is_logged_in()){
+		$bookmarks = db_select('bookmark', 'b')
+			->fields('b')
+			->condition('uid', $user->uid)
+			->execute()
+			->fetchAll();
+		$output = '';
+		$output .= '<ul id="bookmarks">';		
+		foreach($bookmarks as $bookmark){ 
+			$title = db_select('node', 'n')
+				->fields('n', array('title'))
+				->condition('nid', $bookmark->nid)
+				->execute()->fetchField(); 
+			$path = 'node/' . $bookmark->nid;
+			$new_path = drupal_get_path_alias($path); 
+			$output .= '<li>';
+			$output .= '<span class="bookmark_link">' . l($title, $path) . '</span>';
+			$output .= l('Delete', 'bookmark/delete/' . $bookmark->bid, array('attributes' => array('class' => 'delete_bookmark')));
+			$output .= '<div class="clear"></div></li>';
+		}
+		$output .= '</ul>';
+
+		return $output; 
+
+	}else{
+		return FALSE; 
+	}
+}
+
+/*
+*    Checks if the current page is bookmarked
+*/
+function bookmark_check_for_bookmark($nid){
+	global $user;
+	$result = db_select('bookmark', 'b')
+		->fields('b')
+		->condition('nid', $nid)
+		->condition('uid', $user->uid)
+		->execute()->fetchAssoc();
+	if(!empty($result)){
+		return TRUE;
+	}else{
+		return FALSE;
+	}
+}
+
+
+/* 
+*    Deletes user-selected bookmark from the database and prints 
+*    the results to the ajax call
+*/
+function bookmark_delete_bookmark($bid){
+	$bookmark = intval($bid); 
+	global $user; 
+	db_delete('bookmark')
+	    ->condition('bid', $bookmark)
+	    ->condition('uid', $user->uid)
+	    ->execute(); 
+	$bookmarks = get_bookmarks(); 
+	print $bookmarks;
+	exit(); 
+}
+
+/* 
+*    Adds the user-selected bookmark to the database and prints 
+*    the results to the ajax call
+*/
+function bookmark_add_bookmark($nid){
+	global $user;
+
+	//Check to see if bookmarks are equal to the limit of 50
+	$check_limit = db_select('bookmark', 'b')
+		->condition('uid', $user->uid)
+		->fields('b')
+		->execute()
+		->fetchAll();
+
+	//Check to see if the current article is bookmarked to avoid duplicates
+	$is_bookmarked = db_select('bookmark', 'b')
+		->fields('b')
+		->condition('uid', $user->uid)
+		->condition('nid', $nid)
+		->execute()->fetchAll();
+
+	//Check counts of both variables and print errors or content accordingly
+	//If either returns true a number is returned and an error is set in 
+	//javascript
+	if( count($check_limit) >= 50 ){
+		print 0; 
+		exit(); 
+	}elseif( count($is_bookmarked) >= 1 ){
+		print 1;
+		exit();
+	}else{
+		db_insert('bookmark')
+		    ->fields(array(
+		    	'uid' => $user->uid,
+		    	'nid' => $nid,
+		    ))
+		    ->execute();
+		$bookmarks = get_bookmarks(); 
+		print $bookmarks;
+		exit(); 
+	}
+}
+
+/**
+ * Implements hook_field_extra_fields();
+ *
+ * Declares our bookmark link for nodes
+**/
+function bookmark_field_extra_fields(){
+	$extra['node']['display'] = array(
+		'bookmark_this_page' => array(
+			'label' => t('Custom Bookmark Button'),
+			'description' => t('Bookmark button added in bookmark_node_view()'),
+			'weight' => 0,
+		),
+	);
+	return $extra;
+}
+
+/*
+*  Implements hook_node_view()
+*  Appends the Add Bookmark link to the body of the node
+*/
+function bookmark_node_view($node, $view_mode, $langcode){
+	 //Checks if the current page is bookmarked or not and outputs
+	//The Bookmark link depending on the return value of 
+	//bookmark_check_for_bookmark(); 
+	if(user_is_logged_in() && $node->type == 'news' || $node->type == 'article' || $node->type == 'story'){ 
+		$bookmarked = bookmark_check_for_bookmark($node->nid);
+		if($bookmarked){
+			$bookmarker = '<strong><p class="bookmarker">Article is Bookmarked <i class="fa fa-bookmark fa-2x"></i></p></strong>';
+		}else{
+			$bookmarker = '<strong><p class="bookmarker"><a href="/bookmark/add/' . $node->nid . '" class="bookmark_add">Bookmark this page <i class="fa fa-bookmark fa-2x"></i></a></p></strong>';
+		}
+
+		$node->content['bookmark_this_page'] = array(
+			'#type' => 'item',
+			'#markup' => $bookmarker,
+		);
+	}
+}
+
+/*
+*   Implements hook_install()
+*	Creates the database
+*/
+function bookmark_install(){
+	if( !db_table_exists('bookmark')){
+		$bookmark_settings = array(
+			'fields' => array(
+				'bid' => array(
+					'type' => 'serial',
+					'not null' => TRUE,
+				),
+				'uid' => array(
+					'type' => 'int',
+					'not null' => TRUE,
+				),
+				'nid' => array(
+					'type' => 'int',
+					'length' => 10,
+					'not null' => TRUE,
+				),
+			),
+			'primary key' => array(
+				'bid',
+			),
+		);
+		db_create_table('bookmark', $bookmark_settings);
+	}
+}

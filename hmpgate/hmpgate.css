@@ -1,0 +1,144 @@
+.close-gate{
+	position: absolute;
+	top: 2px;
+	right: 5px; 
+    font-size: 25px; 
+    z-index: 999999;
+    cursor: pointer; 
+}
+i.close-gate:hover{
+	opacity: .8;
+}
+.gate-header{
+	position: relative;
+}
+.gate-sidebar{
+	float: left;
+	width: 35%;
+}
+.gate-sidebar img{
+	max-width: 100%;
+}
+.admin-gate-type .form-item {
+	margin-left: 40px;
+}
+
+.admin-gate-type .form-type-checkbox {
+	margin-left: 0px;
+}
+
+
+.hmpgate-overlay {
+	position: fixed;
+	background: rgba(0,0,0,.8);
+	left: 0;
+	top: 0;
+	height: 100%;
+	width: 100%;
+	z-index: 9998;
+	display: none;
+}
+
+.hmpgate-popup .close-gate{
+    position: absolute;
+    top: 2px;
+    right: 5px;
+    font-size: 25px;
+    z-index: 999999;
+}
+
+.hmpgate-popup {
+	background: #fff;
+	border: 2px solid #ccc;
+	top: 12.5%;
+	left: 10%;
+	right: 10%;
+	position: fixed;
+	z-index: 9999999999999;
+	overflow-x:hidden;
+	overflow-y: scroll;
+	width: 800px;
+	margin: 0 auto;
+	display: none;
+}
+.hmpgate-popup img{
+	max-width: 100%; 
+}
+
+.hmpgate-form {
+	padding-right: 10px;
+	width: 63%;
+	float: left; 
+}
+
+.hmpgate-popup #user-register-form h2,
+.hmpgate-popup #user-register-form .captcha legend {
+	display: none;
+}
+
+.hmpgate-popup #user-register-form .account-area, 
+.hmpgate-popup #user-register-form .captcha {
+	padding: 0px;
+}
+
+.hmpgate-popup .login-links {
+	position: relative;
+}
+
+.hmpgate-popup .login-links a {
+	font-size: 12px;
+	font-weight: bold; 
+	margin-right: 20px;
+}
+
+.gated:before {
+	background: url(images/key.png) left center no-repeat;
+	display: inline-block;
+	content: "";
+	width: 20px;
+	height: 8px;
+}
+@media(max-width: 962px){
+	.hmpgate-popup{
+		max-height: 500px; 
+		max-width: 90%;
+		left: 5%; 
+	}
+}
+@media(max-width: 800px){
+	.hmpgate-popup .gate-sidebar{
+		display: none; 
+	}
+	.hmpgate-popup .hmpgate-form{
+		width: 95%; 
+		padding: 0;
+		margin: auto; 
+		float: none; 
+	}
+	.hmpgate-form #user-login label{
+		width: 30%;
+		float: none; 
+	}
+	.hmpgate-form #user-login input{
+		max-width: 100%; 
+	}
+	.hmpgate-form .login-forgot{
+		text-align: right; 
+	}
+	.hmpgate-popup .login-links a{
+		margin-right: auto; 
+		font-size: 14px; 
+	}
+	.hmpgate-form .form-actions button, .login-links .register-button{
+		display: block;
+		width: 250px;  
+		margin: 0 auto;
+		text-align: center;
+	}
+	.home-page{
+		position: static !important;
+		float: right;
+		margin-top: 6px;
+		margin-right: 12px !important; 
+	}
+}

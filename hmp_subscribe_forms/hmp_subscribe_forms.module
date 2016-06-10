@@ -1,0 +1,281 @@
+<?php
+
+/**
+**
+**  Implements hook_menu()
+**
+**/
+function hmp_subscribe_forms_menu(){
+
+	$menu = array();
+
+	$menu['subscribe/%'] = array(
+		'title' => t('Subscribe'),
+		'type' => MENU_NORMAL_ITEM,
+		'access arguments' => array('access content'), 
+		'page callback' => 'drupal_get_form',
+		'page arguments' => array('subscribe_form_build_subscribepage', 1),
+	);
+
+  $menu['admin/content/hmp-subscribe-forms'] = array(
+    'title' => t('HMP Subscribe Forms'),
+    'type' => MENU_NORMAL_ITEM,
+    'access arguments' => array('administer content'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('hmp_subscribe_forms_createforms'),
+    'file' => 'hmp_subscribe_forms.admin',
+  );
+
+	$menu['admin/content/hmp-subscribe-forms/add_form'] = array(
+		'title' => t('Add Form'),
+		'type' => MENU_DEFAULT_LOCAL_TASK, 
+		'access arguments' => array('administer content'),
+    'file' => 'hmp_subscribe_forms.admin',
+	);
+
+  $menu['admin/content/hmp-subscribe-forms/select_form'] = array(
+    'title' => t('Edit Form'),
+    'type' => MENU_LOCAL_TASK, 
+    'access arguments' => array('administer content'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('hmp_subscribe_forms_selectforms'),
+    'file' => 'hmp_subscribe_forms.admin',
+  );
+
+  $menu['admin/content/hmp-subscribe-forms/edit_form/%'] = array(
+    'title' => t('Edit Form'),
+    'access arguments' => array('administer content'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('hmp_subscribe_forms_editform', 4),
+    'file' => 'hmp_subscribe_forms.admin',
+  );
+
+  $menu['admin/content/hmp-subscribe-forms/delete_form/%/%'] = array(
+    'title' => t('Delete Form'),
+    'access arguments' => array('administer content'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('hmp_subscribe_forms_deleteform', 4, 5),
+    'file' => 'hmp_subscribe_forms.admin',
+  );
+
+  $menu['admin/content/hmp-subscribe-forms/settings'] = array(
+    'title' => t('Settings'),
+    'access arguments' => array('administer content'),
+    'page callback' => 'drupal_get_form',
+    'type' => MENU_LOCAL_TASK,
+    'page arguments' => array('hmp_subscribe_forms_settings'),
+    'file' => 'hmp_subscribe_forms.admin', 
+  );
+
+	return $menu; 
+}
+
+/**
+**
+**  We build the actualy subscribe page
+**  The Drupal system path is subscribe/* but the visible path will be whatever alias is used. 
+**
+**/
+function subscribe_form_build_subscribepage($form, &$form_state, $form_id){
+  $form = array();
+  $forms = array();
+  $check_fields = false; 
+  //Get all the current subscription forms
+  $current_forms = hmp_subscribe_forms_get_forms();
+  //if there are no forms then redirect to 404 not found
+  if(!count($current_forms)){
+    drupal_not_found();
+  }else{
+    //pull the current form
+    $values = db_select('hmp_subscribe_forms','h')
+    ->fields('h')
+    ->condition('form_id', $form_id, '=')
+    ->execute()
+    ->fetchAssoc();
+
+    //if for some reason the alias doesn't exist, pull the form with the lowest weight
+    if(empty($values)){
+      $values = db_select('hmp_subscribe_forms', 'h')
+        ->fields('h')
+        ->orderBy('form_weight', 'ASC')
+        ->range(0,1)
+        ->execute()->fetchAssoc();
+    }
+    $form['hmp_subscribe_form'] = array(
+      '#type' => 'fieldset',
+      '#prefix' => '<div class="hmp_subscribe_form">',
+      '#suffix' => '</div>',
+    );
+    //If the settings and this form are checked to show in the multiple forms select box
+    if($values['form_multiple'] == 1 && variable_get('hmp_subscribe_forms_multiple_forms', 0) == 1){
+      //If the form is checked add it to the select options
+      //The key is the alias to be sent to hmp_subscribe_forms.js onchange
+      foreach($current_forms as $current_form){
+        if($current_form->form_multiple == 1){
+          $forms[$current_form->path_alias] = $current_form->form_name; 
+        }
+      } 
+      //The multiple forms select box
+      $form['hmp_subscribe_form']['multiple'] = array(
+        '#type' => 'select',
+        '#title' => 'Register for',
+        '#options' => $forms,
+        '#default_value' => $values['path_alias'],
+        '#empty_value' => 'Select a brand', 
+        '#prefix' => '<div class="register-page-selector">',
+        '#suffix' => '</div>', 
+        '#attributes' => array(
+          'onchange' => 'hmp_subscribe_forms_redirect(this)'
+        ),
+      );
+    }
+  }
+
+  //If the image is empty don't show the image field
+  if(!empty($values['form_image']) && $values['form_image'] != 0){
+    $image = file_load($values['form_image']);
+    $form['hmp_subscribe_form']['image'] = array(
+      '#type' => 'markup',
+      '#markup' => '<div class="subscription_form_image">' . drupal_render(file_view_file($image)) .  '</div>', 
+    );
+  }
+
+  if(!empty($values['form_body'])){
+    $form['hmp_subscribe_form']['body'] = array(
+      '#type' => 'markup',
+      '#markup' => $values['form_body'],
+      '#prefix' => '<div class="hmp_subscribe_forms-body">',
+      '#suffix' => '</div>',
+    );
+  }
+
+  //Parse the json options and get it ready for the forms.
+  //If type = 1 the option will be in the select box
+  //If type = 2 the option will be in the radio box
+  if(!empty($values['form_options'])){
+    $link_options = json_decode($values['form_options']);
+    $select_options = array(); 
+    $radio_options = array(); 
+    foreach($link_options as $options){
+      if(!empty($options->options)){
+        $parsed_options = explode(PHP_EOL, $options->options);
+        foreach($parsed_options as $option){
+          $option = trim($option);
+          if($options->type == 1){ 
+            $select_options[$option] = $option;
+          }elseif($options->type == 2){
+            $radio_options[$option] = $option; 
+          }
+        } 
+      }
+    }
+  }
+
+  if(!empty($select_options)){
+    $form['hmp_subscribe_form']['select_profession'] = array(
+      '#type' => 'select',
+      '#title' => t('SUBSCRIBE OR RENEW HERE'),
+      '#options' => $select_options,
+      '#required' => TRUE,  
+      '#empty_value' => '', 
+      '#prefix' => '<div class="hmp_subscribe_forms-select-profession">',
+      '#suffix' => '</div>',
+    );
+    $check_fields = true;
+  }
+
+  if(!empty($radio_options)){
+    $form['hmp_subscribe_form']['radio'] = array(
+      '#type' => 'radios',
+      '#options' => $radio_options, 
+      '#prefix' => '<div class="hmp_subscribe_forms-radio-buttons">',
+      '#suffix' => '</div>', 
+    );
+    $check_fields = true;
+  }
+
+  //The form id to be sent in $form_state
+  $form['hmp_subscribe_form']['fid'] = array(
+    '#type' => 'hidden',
+    '#value' => $form_id, 
+  );
+
+  if($check_fields){
+    $form['hmp_subscribe_form']['submit'] = array(
+      '#type' => 'submit',
+      '#value' => 'Submit',
+    );
+  }
+
+   if(!empty($values['form_enews_link'])){
+    $form['hmp_subscribe_form']['enews_link'] = array(
+      '#type' => 'markup',
+      '#markup' =>  '<div class="hmp_subscribe_forms-enews-link">Sign up for E-news <strong><a href="' . $values['form_enews_link'] . '">here</a></strong>.</div>',
+      '#prefix' => '<div class="hmp_subscribe_forms-enews-link">',
+      '#suffix' => '</div>', 
+    );
+  }
+
+  return $form;
+}
+
+/**
+**
+**  Implement hook_submit()
+**
+**/
+function subscribe_form_build_subscribepage_submit($form, $form_state){
+  $values = $form_state['values'];
+
+  //Pull the form options from the db to compare with the submitted values
+  $db_values = db_select('hmp_subscribe_forms','h')
+    ->fields('h', array('form_options'))
+    ->condition('form_id', $values['fid'], '=')
+    ->execute()
+    ->fetchField();
+  //cough, hack, if you didn't notice...The options are in json
+  $db_values = json_decode($db_values); 
+
+  //Here we are making the radio buttons take precedence over the select options
+  //If a radio button is checked, the user is redirected to that link
+  //If a select button is checked and no radio buttons are then the user is redirected to the select link
+  if(!empty($values['radio'])){
+    $radio = $values['radio'];
+    foreach($db_values as $db_value){
+      if($db_value->type == 2){
+        $options = explode(PHP_EOL, $db_value->options);
+        foreach($options as $option){
+          if(trim($radio) == trim($option)){
+            $redirect = $db_value->link;
+          }
+        }
+      }
+    }
+  }elseif(!empty($values['select_profession'])){
+    $profession = $values['select_profession'];
+    foreach($db_values as $db_value){
+      if($db_value->type == 1){
+        $options = explode(PHP_EOL, $db_value->options);
+        foreach($options as $option){
+          if(trim($profession) == trim($option)){
+            $redirect = $db_value->link; 
+          }
+        }
+      }
+    }
+  }
+  
+  header('Location: ' . $redirect);
+  exit(); 
+}
+
+//Gets all the current subscription forms from the db
+function hmp_subscribe_forms_get_forms(){
+  $db_forms = db_select('hmp_subscribe_forms', 'h')
+    ->fields('h', array('form_id', 'path_alias','form_name','form_multiple'))
+    ->orderBy('form_weight', 'ASC')
+    ->execute()
+    ->fetchAll();
+
+    return $db_forms; 
+}

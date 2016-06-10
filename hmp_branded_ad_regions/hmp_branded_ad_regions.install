@@ -1,0 +1,6 @@
+<?php
+function hmp_branded_ad_regions_uninstall(){
+	$check = db_delete('variable')
+		->condition('name',db_like('hmp_branded_ad').'%', 'LIKE')
+		->execute();
+}

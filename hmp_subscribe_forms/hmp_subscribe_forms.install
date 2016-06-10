@@ -1,0 +1,64 @@
+<?php 
+function hmp_subscribe_forms_schema(){
+	
+	$schema['hmp_subscribe_forms'] = array(
+		'fields' => array(
+			'form_id' => array(
+				'type' => 'serial',
+				'not null' => TRUE,
+			),
+			'form_multiple' => array(
+				'type' => 'int',
+				'default' => 0,
+				'length' => 1,
+			),
+			'form_tag' => array(
+				'type' => 'int',
+				'length' => '3',
+			),
+			'form_name' => array(
+				'type' => varchar,
+				'length' => 255, 
+				'default' => '',
+			),
+			'form_image' => array(
+				'type' => 'int',
+				'length' => 10,
+				'default' => 0,
+			),
+			'form_body' => array(
+				'type' => 'varchar',
+				'length' => 2000,
+				'default' => '',
+			),
+			'form_body_format' => array(
+				'type' => 'varchar',
+				'length' => 25,
+				'default' => 'html',
+			),
+			'form_options' => array(
+				'type' => 'text',
+				'length' => 10000, 
+				'not null' => TRUE,
+			),
+			'form_weight' => array(
+				'type' => 'int',
+				'length' => 3,
+				'default' => 0,
+			),
+			'form_enews_link' => array(
+				'type' => 'varchar',
+				'length' => 255,
+			),
+			'path_alias' => array(
+				'type' => 'varchar',
+				'length' => 255,
+				'not null' => TRUE, 
+			),
+		),
+		'primary key' => array('form_id'),
+
+	);
+
+	return $schema; 
+}

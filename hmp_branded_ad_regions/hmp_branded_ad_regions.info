@@ -1,0 +1,3 @@
+name = HMP Branded Ad Regions
+description = Place ad code in specific regions based on taxonomy
+core = 7.x

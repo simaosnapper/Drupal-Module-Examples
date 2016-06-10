@@ -1,0 +1,593 @@
+<?php
+/*
+*
+*  This module is what happens when you try to combine two modules into one using both features.
+*  Note to self.  Next time, make a new module.   If you can figure out how this works let me know.
+*  The sad thing is....  It works very well.  
+*
+*/
+
+/**
+ * Implements hook_views_api().
+ */
+function hmpgate_views_api() {
+  return array(
+    'api' => 3.0,
+  );
+}
+
+//Admin Settings Menu
+function hmpgate_menu(){
+	$items['admin/config/content/hmpgate'] = array(
+		'title' => 'HMP GATE',
+	    'description' => t('Content gate admin settings'),
+	    'page callback' => 'drupal_get_form',
+	    'page arguments' => array('hmpgate_admin_settings'),
+	    'access arguments' => array('administer gated content'),
+	    'file' => 'hmpgate.admin.inc',
+	    'type' => MENU_NORMAL_ITEM,
+	);
+	return $items;
+}
+
+/**
+ * Implementation of hook_permission().
+ */
+function hmpgate_permission() {
+  return array(
+    'access gated content' => array(
+      'title' => t('Access All Gated Nodes'),
+	  'description' => t('View all gated content, regardless of setting.'),
+    ),
+    'gate content' => array(
+      'title' => t('Gate Nodes'),
+	  'description' => t('Set the gate settings on nodes that can be gated.'),
+    ),
+    'administer gated content' => array(
+      'title' => t('Administer Gated Content Types'),
+	  'description' => t('Update the admin settings for gated content types.'),
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_init().
+ */
+function hmpgate_init() { 
+  if(isset($_GET['validation']) && $_GET['validation'] == 'TRUE') {
+  	drupal_add_js('alert("Hello World");');
+    drupal_goto('user/login?destination=' . current_path());
+  }
+  // See if we have a url to redirect the user to.
+  if(isset($_SESSION['prevurl'])) {
+	if(arg(1) != $_SESSION['prevurl']) {
+	  $url = 'node/' . $_SESSION['prevurl'];
+	  drupal_goto($url);
+	} else {
+	  unset($_SESSION['prevurl']);
+	}
+  }
+}
+
+/**
+* 
+* Get all Gated Vocabularies set in the admin page
+*
+**/
+function hmpgate_get_gated_vocabularies(){
+  $vocabularies = taxonomy_get_vocabularies();
+  $gated_vocabularies = array();
+  foreach($vocabularies as $vocabulary){
+  	$vocabulary_status = variable_get('hmpgate_taxonomy' . $vocabulary->vid . '_status', 0); 
+  	if($vocabulary_status > 0){
+  		$gated_vocabularies[] = $vocabulary->vid; 
+  	}
+  }
+  return $gated_vocabularies; 
+}
+
+/**
+*
+* Sets Main Gate for either nodes or views that query this node's body
+*
+* @param array $gate contains all the progressive information throughout the gating process 
+* use dpm() for more information 
+* All $gate variables are cross referenced to maintain consistency among common settings between content types and
+* taxonomy that are gated.  Since more than one vocabulary and role can be selected for content types and taxonomy
+* everything is compared to avoid conflicts.  The final gate ($lock) is set based on all information availabe on the 
+* specific node in question.  
+* @return array $lock returns the message and gate that will be used.  $lock['gate'] can be either a string or integer 
+* ('instant', int val, or 'not gated') and $lock['message'] will be the message that was set in admin if there is one
+*
+*
+**/
+function hmpgate_set_gates($node_id){
+	global $user;
+	$node = node_load($node_id); 
+	$gate = array();
+	$gate['gated'] = FALSE;
+	$gate['instant_gate'] = FALSE;
+	$gate['gated_terms'] = FALSE; 
+	$gate['gated_vocabulary'] = FALSE;
+	$gate['gated_vocabularies'] = hmpgate_get_gated_vocabularies();
+	$gate['this_node_gated_vocabularies'] = array();
+	$gate['node_type'] = $node->type; 
+    $gate['type_status'] = variable_get('hmpgate_' . $node->type, 0); 
+    //Check if specific terms from vocabularies were gated. 
+    $gate['node_taxonomy_terms'] = hmpgate_node_get_taxonomy_terms($node->nid);
+    $gate['node_taxonomy_term_gate_settings'] = hmpgate_get_settings(array_keys($gate['node_taxonomy_terms']), 'taxonomy');
+    //After getting the taxonomy terms on this node check to see if any are gated if not
+    //$gate['node_taxonomy_term_gate_settings'] will be 0
+	if(count($gate['node_taxonomy_term_gate_settings']) > 0 && $gate['node_taxonomy_term_gate_settings'] > 0 || count($gate['node_taxonomy_term_gate_settings']) > 0 && is_array($gate['node_taxonomy_term_gate_settings'])){
+		$gate['gated_terms'] = TRUE; 
+	}
+	/*
+	* Only check if vocabulary is gated if terms aren't. We also check if there are terms gated on the
+	* specific vocabulary.  If so and no terms in this vocabulary
+	* are selected on this node then the node is not gated.  In this way, only the selected terms
+	* on the vocabulary are gated.  
+	*/
+	if($gate['gated_terms'] === FALSE){
+		foreach($gate['node_taxonomy_terms'] as $term) {
+			if(in_array($term['vid'], $gate['gated_vocabularies'])){ 
+				if(!in_array($term['vid'], $gate['this_node_gated_vocabularies'])){
+					$gate['this_node_gated_vocabularies'][] = $term['vid'];
+				}
+				if(count($gate['this_node_gated_vocabularies'])){					
+					foreach($gate['this_node_gated_vocabularies'] as $gated_vocabulary){
+						$tree = taxonomy_get_tree($gated_vocabulary);
+						$child_term_ids = array(); 
+						foreach($tree as $child_term){
+							if(!in_array($child_term->tid, array_keys($gate['node_taxonomy_terms']))){
+								$child_term_ids[] = $child_term->tid;
+							}
+						} 
+						$gate['this_node_gated_vocabularies_gated_terms'] = hmpgate_get_settings($child_term_ids, 'taxonomy'); 
+					}
+				}
+				if(isset($gate['this_node_gated_vocabularies_gated_terms']) && !count($gate['this_node_gated_vocabularies_gated_terms']) > 0 || is_numeric($gate['this_node_gated_vocabularies_gated_terms']) && !$gate['this_node_gated_vocabularies_gated_terms'] > 0 || $gate['this_node_gated_vocabularies_gated_terms'] == 0 && count($gate['this_node_gated_vocabularies']) > 1){
+					$gate['gated_vocabulary'] = TRUE; 
+				}
+			} 
+		}
+	}
+	if($gate['gated_terms'] || $gate['gated_vocabulary']){
+		$gate['gated_by_taxonomy_roles'] = array(); 
+		foreach($gate['node_taxonomy_terms'] as $key => $node_taxonomy_terms){
+			$vid = $node_taxonomy_terms['vid'];  
+			$role_ids = hmpgate_get_roles($vid, 'taxonomy', TRUE);
+			if(count($role_ids) > 0){
+				foreach($role_ids as $role_id){
+					if(in_array($role_id, $gate['gated_by_taxonomy_roles'])){
+						continue;
+					}else{
+						$gate['gated_by_taxonomy_roles'][] = $role_id; 
+					}
+				}
+			}
+		}
+	}
+	if(isset($node->gatestatus) && $node->gatestatus > 0 && !in_array('authenticated user', $user->roles)){
+	    $gate['instant_gate'] = TRUE;
+	}
+    //The roles that can view the content type if any are set.  
+    if(!$gate['instant_gate']){
+		if($gate['type_status'] === $gate['node_type'] || $gate['gated_vocabulary'] || $gate['gated_terms']){
+			$lock['role'] = FALSE; 
+			//Checks to see if the user role matches the allowed roles for this content type or taxonomy on this node
+			$gate['gated_by_content_roles'] = hmpgate_get_roles($gate['node_type'],'content_type',TRUE);
+			if(isset($gate['gated_by_taxonomy_roles']) && count($gate['gated_by_taxonomy_roles']) > 0 && is_array($gate['gated_by_taxonomy_roles'])){
+				$gate_user_role_by_taxonomy = array_intersect($gate['gated_by_taxonomy_roles'],array_keys($user->roles)); 
+				if(count($gate_user_role_by_taxonomy) === 0 && $user->role !== 'administrator'){ 
+					$lock['role'] = TRUE;
+				}
+			}
+			if(isset($gate['gated_by_content_roles']) && count($gate['gated_by_content_roles']) > 0 && is_array($gate['gated_by_content_roles'])){
+				$gate_user_role_by_content = array_intersect($gate['gated_by_content_roles'], array_keys($user->roles));
+				if(count($gate_user_role_by_content) === 0 && $user->role !== 'administrator'){
+					$lock['role'] = TRUE; 
+				}
+			} 
+			$gate['gated'] = TRUE;
+		}
+	}
+	if($gate['gated'] || $gate['instant_gate']){
+		//Set gate message.  Taxonomy type message takes priority if other messages are set.  Due to 
+		//conflicts if mutliple messages are set the first taxonomy gated message found is used. 
+		$content_message_status = variable_get('hmpgate_' . $node->type .'_message_status', '');
+		if(isset($gate['this_node_gated_vocabularies'])){
+			foreach($gate['this_node_gated_vocabularies'] as $vid){
+				$taxonomy_message_status = variable_get('hmpgate_taxonomy_' . $vid . '_message_status', '');
+				if(!empty($taxonomy_message_status)){
+					$taxonomy_message = variable_get('hmpgate_taxonomy' . $vid . '_message', '');
+					if(!empty($taxonomy_message)){
+						break; 
+					}
+				}
+			}
+		}
+		if(!empty($content_message_status)){
+			$content_message = variable_get('hmpgate_' . $node->type . '_message', '');
+		}  
+		if(!empty($taxonomy_message)){
+			$lock['message'] = $taxonomy_message;
+		}elseif(!empty($content_message) && empty($taxonomy_message)){
+			$lock['message'] = $content_message;
+		}elseif(empty($content_message) && empty($taxonomy_message)){
+			$main_message = variable_get('hmpgate_message', '');
+			$lock['message'] = $main_message;
+		}else{
+			$lock['message'] = ''; 
+		}
+	}
+	if(!$gate['instant_gate']){
+		//If the content type is gated check to see if the node is gated 
+		if($gate['gated']){
+		  	//If either taxonomy or vocabularies are set to gate get the allowed number of views.  
+			if($gate['gated_terms'] || $gate['gated_vocabulary']){
+				$allowed_views_by_taxonomy = array(); 
+				foreach($gate['gated_vocabularies'] as $vocabulary){
+					$allowed_views_by_taxonomy[] = variable_get('hmpgate_taxonomy' . $vocabulary . '_num_views', 0); 
+				} 
+				$gate['taxonomy_allowed_views'] = min($allowed_views_by_taxonomy); 
+			}
+			if($gate['type_status'] == $gate['node_type']){
+				//The allowed views per content type
+				$gate['content_allowed_views'] = variable_get('hmpgate_' . $node->type . '_num_views', 0);
+			}
+		}
+	}
+	//Sets instant gate and returns it or, if the node is not instant gated, we get the allowed views for everything
+	//on the node.  To avoid any conflicts, we pick the lowest allowed views from anything that is on this node.  
+	if($gate['instant_gate']){
+		$lock['gate'] = 'instant'; 
+		return $lock; 
+	}elseif($gate['gated']){
+		if(isset($gate['taxonomy_allowed_views']) && isset($gate['content_allowed_views'])){
+			$lock['gate'] = min($gate['taxonomy_allowed_views'], $gate['content_allowed_views']);
+		}elseif(isset($gate['taxonomy_allowed_views']) && !isset($gate['content_allowed_views'])){
+			$lock['gate'] = $gate['taxonomy_allowed_views'];
+		}elseif(!isset($gate['taxonomy_allowed_views']) && isset($gate['content_allowed_views'])){
+			$lock['gate'] = $gate['content_allowed_views'];
+		}else{
+			$lock['gate'] = 'not gated'; 
+		}
+	}elseif(!$gate['instant_gate'] && !$gate['gated']){
+		$lock['gate'] = 'not gated'; 
+	}
+
+	//Set the session view counts per gated content view
+	if($gate['gated'] && !$gate['instant_gate']){
+		//if user has been absent/inactive for more than 5 minutes, reset the gate
+		if(isset($_SESSION['timestamp_page_gate'])) {
+			if((time() - $_SESSION['timestamp_page_gate']) > 300) {
+					$_SESSION['node_count'] = 0;
+			}
+		}
+		if(isset($_SESSION['node_count'])) { 
+			$_SESSION['node_count']++;
+		}else {
+			$_SESSION['node_count'] = 1;
+		}
+		$_SESSION['timestamp_page_gate'] = time();
+	}   
+	return $lock; 
+}
+
+/**
+ * Implementation of hook_node_view().
+ */
+function hmpgate_node_view($node, $view_mode, $langcode) {
+	if(arg(0) == 'node'){
+		if($view_mode == 'full') {
+			global $user; 
+			$lock = hmpgate_set_gates($node->nid);   
+			if($lock['gate'] === 'instant' && !user_is_logged_in() || is_numeric($lock['gate']) && $_SESSION['node_count'] > $lock['gate'] && !user_is_logged_in() || isset($lock['role']) && $lock['role']){
+			    $message = hmpgate_setup_gated_message($node->nid, $lock['message']);
+			    $node->content['body'][0]['#markup'] = $message['title'] . $message['body'];
+			}
+		}
+	}
+}
+
+/**
+ * Implements hook_field_display_alter().
+ *
+ * We implement this hook in order to modify unauthorized nodes in views
+ * It uses the same process in hook_node_view 
+ *  
+ */
+function hmpgate_views_pre_render(&$view){
+	if(arg(0) == 'node'){
+		global $user;
+		foreach($view->result as $node){
+			if(isset($node->nid) && isset($node->field_body) && $view->field['body']->options['alter']['max_length'] == 0 && !isset($view->field['body']->options['settings']['trim_length'])){ 
+				$lock = hmpgate_set_gates($node->nid);  
+				if($lock['gate'] === 'instant' && !user_is_logged_in() || is_numeric($lock['gate']) && $_SESSION['node_count'] > $lock['gate'] && !user_is_logged_in() || isset($lock['role']) && $lock['role']){
+					$message = hmpgate_setup_gated_message($node->nid, $lock['message']); 
+					$node->field_body[0]['rendered']['#markup'] = $message['body'];  
+				}
+			}
+		}
+	}
+}
+
+function hmpgate_setup_gated_message($node, $message){
+	$node = node_load($node);  
+	$final['title'] = '<h1 class="page-header">' . $node->title . '</h1>';
+	// If there is a body & summary, we change the body to be the summary
+    $user_login = drupal_get_form('user_login');
+    $form = render($user_login);
+    $form .= '<div class="login-links">';
+    $form .= l('Register Now', '/user/register', array('query' => array('form' => 'register'), 'attributes' => array ('class' => 'register-button')));
+    $form .= '<a class="home-page" href="/">Return to Homepage</a><h1></h1></div>';
+  
+    // Prepare the overlay & add it to the node form
+    $content = ""; 
+    dpm($node); 
+    //The login form only shows in Modal if jQuery triggers it in custom.js so we 
+    //Check if the form has an error and if it does override external CSS styles to display 
+    //form again without pressing the login button.  
+    if(isset($_GET['validation']) && !empty($_GET['validation'])){ 
+      	$content .= '<div class="hmpgate-overlay close-gate" style="display:block !important;"></div>';
+    	$content .= '<div class="hmpgate-popup" style="display:block !important;">';
+    }else{
+    	$content .= '<div class="hmpgate-overlay close-gate"></div>';
+    	$content .= '<div class="hmpgate-popup">';
+    } 
+    $content .= '<i class="fa fa-times-circle-o close-gate"></i>'; 
+  	$hmpgate_form = '<div class="hmpgate-form">' . theme('status_messages', array('display' => 'error')) . $form . '</div>';
+  	$hmpgate_message = str_replace('[FORM]', $hmpgate_form , $message['value']); 
+  	$content .= $hmpgate_message;
+  	$content .= '</div>'; 
+  	// If there is a body & summary, we change the body to be the summary
+  	// just in case someone can see through the overlay.
+  	if(isset($node->body['und'][0]['value']) && isset($node->body['und'][0]['summary'])) {
+  		$text = '<p>You must<strong> ' . l('Log In', 'user/login', array('query' => drupal_get_destination(), 'attributes' => array('class' => 'page-gate-popup'))) . ' </strong>to view the full content</p>';
+  		$final['body'] = '<div class="node-body">' . $text . $node->body['und'][0]['summary'] . $content . '</div>';
+  	}else{
+  		$text = '<p>You must<strong> ' . l('Log In', 'user/login', array('query' => drupal_get_destination(), 'attributes' => array('class' => 'page-gate-popup'))) . ' </strong>to view the full content</p>';
+  		$final['body'] = $text . $content; 
+  	}
+  	return $final;
+}
+
+
+/**
+ * Implements hook_form_alter().
+ */
+function hmpgate_form_alter(&$form, $form_state, $form_id) {
+  // Add our gate features to content which can be gated
+  if (isset($form['type']) && isset($form['#node']) && $form['type']['#value'] . '_node_form' == $form_id && user_access('gate content')) {
+	  $form['gate'] = array(
+		'#type' => 'fieldset',
+		'#title' => t('Gate Settings'),
+		'#weight' => -50,
+		'#attributes' => array('class' => array('hmpgate-settings')),
+		'#access' => user_access('gate content'),
+	  );
+
+	  // Only support vertical tabs if there is a vertical tab element.
+	  foreach (element_children($form) as $key) {
+		if (isset($form[$key]['#type']) && $form[$key]['#type'] == 'vertical_tabs') {
+		  $form['gate']['#group'] = $key;
+		  $form['gate']['#attached']['js']['vertical-tabs'] = drupal_get_path('module', 'hmpgate') . '/hmpgate.js';
+		}
+	  }
+
+	  $form['gate']['gatestatus'] = array(
+		'#type' => 'select',
+		'#title' => t('Gate Status'),
+		'#options' => array(0 => 'Not Gated', 1 => 'Gated'),
+		'#default_value' => (hmpgate_get_settings($form['nid']['#value'], 'node') > 0) ? 1 : 0,
+	  );
+	
+  // Change the register or login form if it's on a node.
+  // We just append the current nid to our form so we can retrieve
+  // upon user login 
+  } elseif($form_id == 'user_register_form' && arg(0) == 'node') {
+	$form['nid'] = array('#type' => 'hidden', '#value' => arg(1));
+	$form['newuser'] = array('#type' => 'hidden', '#value' => 1);
+	$alias = drupal_get_path_alias('node/' . arg(1));
+	$form['gatesource'] = array('#type' => 'hidden', '#value' => $alias);
+  } 
+  if($form_id == 'user_login') {
+	$form['#submit'][0] = 'hmp_cas_client_login_validation';
+		unset($form['#validate'][2]);
+		unset($form['#validate'][1]);
+		unset($form['#validate'][0]);
+		if(isset($_GET['validation']) && $_GET['validation'] == 'FALSE')
+				$form['name']['#prefix'] = '<div class="form-error">Your username/password combination is invalid</div>';
+		if(isset($_GET['username'])) 
+			$form['name']['#default_value'] = $_GET['username'];
+	$form['nid'] = array('#type' => 'hidden', '#value' => arg(1));
+	$form['newuser'] = array('#type' => 'hidden', '#value' => 0);
+	$alias = drupal_get_path_alias('node/' . arg(1));
+	$form['gatesource'] = array('#type' => 'hidden', '#value' => $alias);
+  }
+  return $form;
+}
+
+/**
+ * Implements hook_preprocess_node().
+ */
+function hmpgate_preprocess_node(&$variables) {
+
+  if($variables['gatestatus'] == 1 && $variables['view_mode'] == 'teaser') {
+	$variables['classes_array'][] = 'gated';
+  }
+}
+
+/**
+ * Implements hook_user_login().
+ *
+ * If we have an nid in our values, set it in the users session
+ * so we can redirect them back to it.
+ */
+function hmpgate_user_login(&$edit, $account) {
+  if(isset($edit['values']['nid'])) {
+	$_SESSION['prevurl'] = $edit['values']['nid'];
+
+	db_insert('hmpgate_user')
+	->fields(array(
+		'path'=> $edit['values']['gatesource'],
+		'UID'=>$edit['uid'],
+		'newUser'=>$edit['values']['newuser'],
+		))
+		->execute();
+  }
+}
+
+/**
+ * Implements hook_node_insert().
+ */
+function hmpgate_node_insert($node) {
+
+  if(isset($node->gatestatus)) {
+    db_insert('hmpgate')
+    ->fields(array(
+        'entity_id' => $node->nid,
+        'status' => $node->gatestatus,
+        'type' => 'node',
+    ))
+    ->execute();
+  }
+}
+
+/**
+ * Implements hook_node_update().
+ */
+function hmpgate_node_update($node) {
+
+  if(isset($node->gatestatus)) {
+    db_merge('hmpgate')
+	->key(array('entity_id' => $node->nid, 'type' => 'node'))
+    ->fields(array(
+        'entity_id' => $node->nid,
+        'type' => 'node',
+        'status' => $node->gatestatus,
+    ))
+    ->execute();
+  }
+}
+
+/**
+ * Implements hook_node_delete().
+ */
+function hmpgate_node_delete($node) {
+
+  if(isset($node->gatestatus)) {
+	db_delete('hmpgate')
+	  ->condition('entity_id', $node->nid)
+	  ->condition('type', 'node')
+	  ->execute();
+  }
+}
+
+/**
+ * Implements hook_node_load().
+ */
+function hmpgate_node_load($nodes, $types) {
+  // Now we need to make a list of nids
+  foreach ($nodes as $node) {
+	$type = variable_get('hmpgate_' . $node->type, 0);
+	$nodes[$node->nid]->gatetype = $type;
+    if ($type == 1) {
+	  $nodes[$node->nid]->gatestatus = 1;
+	} else {
+      $nids[] = $node->nid;
+    }
+  }
+  // Check if we should run a query or not
+  if (!isset($nids) || !count($nids)) {
+    return;
+  }
+  // Fetch our data from the table
+  $result = db_select('hmpgate', 'g')
+    ->fields('g', array('entity_id', 'status'))
+    ->condition('entity_id', $nids, 'IN')
+    ->condition('type', 'node')
+    ->execute()->fetchAllKeyed();
+
+  foreach ($nids as $record) {
+    $nodes[$record]->gatestatus = isset($result[$record]) ? $result[$record] : 0;
+  }
+}
+
+/**
+ * Fetch all for a content type.
+ *
+ * $type = Machine name of content type.
+ *
+ * $only_valid = Only return roles that should be gated.
+ *
+ */
+function hmpgate_get_roles($entity_identifier, $type = NULL, $only_valid = FALSE) {
+  
+  //Because we use the content type name to identify content types
+  //And taxonomy id to identify taxonomy we check to see if $entity_identifier 
+  //is numeric and set $entity_field to select contents from the appropriate field
+  if(is_numeric($entity_identifier)){
+  	$entity_field = 'entity_id';
+  }else{
+  	$entity_field = 'entity_name'; 
+  }
+
+  $query = db_select('hmpgate_roles', 'r');
+  $query->fields('r', array('rid', 'status'));
+  $query->condition($entity_field, $entity_identifier);
+  $query->condition('type', $type);
+  if($only_valid === TRUE) {
+	$query->condition('status', 0, '!=');
+  }
+  return $query->execute()->fetchAllKeyed();
+}
+
+/**
+*
+*Get all taxonomy terms associated with this node
+*
+**/
+function hmpgate_node_get_taxonomy_terms($nid){
+	$node_terms = db_select('taxonomy_index', 't')
+      ->fields('t', array('tid'))
+      ->condition('nid', $nid, '=')
+      ->execute()->fetchAll();  
+    $terms = array(); 
+    foreach($node_terms as $node_term){
+    	$terms[$node_term->tid] = db_select('taxonomy_term_data', 'td')
+    	  ->fields('td', array('name', 'vid'))
+    	  ->condition('tid', $node_term->tid)
+    	  ->execute()->fetchAssoc(); 
+    }
+    return $terms;
+}
+
+/**
+ * Fetch the settings for a particular node or taxonomy.
+ *
+ * $entity_id = id of entity being viewed, $type is either node or taxonomy
+ * 
+ * Can also fetch multiple nodes $node is an array.
+ */
+function hmpgate_get_settings($entity_id, $type) { 
+  if(!is_array($entity_id)) {
+	$entity_id = array($entity_id);
+  }
+  if(count($entity_id)){
+    $results = db_select('hmpgate', 'h')
+	  ->fields('h')
+	  ->condition('entity_id', $entity_id)
+	  ->condition('status', 1)
+	  ->condition('type', $type)
+	  ->execute()->fetchAllKeyed();
+    if(count($results) == 1) {
+	  $results = array_shift($results);
+    }elseif(count($results) == 0) {
+	  $results = 0;
+    }
+    return $results;
+ }else{
+ 	return FALSE; 
+ }
+}

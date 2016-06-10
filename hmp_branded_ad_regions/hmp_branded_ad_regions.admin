@@ -60,6 +60,13 @@ function hmp_branded_ad_regions_settings($form, &$form_state){
 		'#default_value' => variable_get('hmp_branded_ad_regions_select_regions', array()),
 	);
 
+	$form['hmp_branded_ad_exclusion_list'] = array(
+		'#type' => 'textarea',
+		'#title' => t('Page exclusion list'),
+		'#description' => t('Standard exclusion rules apply (ex: node/455 or node*). Seperate each by a new line.'),
+		'#default_value' => variable_get('hmp_branded_ad_exclusion_list', ''),
+	);
+
 	//save all variables in the system variables table (variables)
 	return system_settings_form($form); 
 }
@@ -114,6 +121,21 @@ function hmp_branded_ad_regions_setup($form, &$form_state){
 						);
 					}
 				}
+
+				$form['hmp_branded_ad_'.$brand->tid]['inclusion_list'] = array(
+					'#type' => 'fieldset',
+					'#title' => t('Inclusion List'),
+					'#collapsible' => TRUE,
+					'#collapsed' => TRUE, 
+				);
+				//Inclusion list for specific branded pages such as resource centers
+				$form['hmp_branded_ad_'.$brand->tid]['inclusion_list']['hmp_branded_ad_brand_'.$brand->tid.'_inclusion_list'] = array(
+					'#type' => 'textarea',
+					'#title' => t($brand->name.' inclusion path list'),
+					'#description' => t('The specific pages you want this brand to show on seperated by a new line.  Important: Make sure each path isn\'t used on other brands to prevent conflicts.'), 
+					'#default_value' => variable_get('hmp_branded_ad_brand_'.$brand->tid.'_inclusion_list',''),
+				);
+
 			} 
 		}
 	}

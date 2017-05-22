@@ -1,0 +1,194 @@
+<?php
+
+/**
+ * Implements hook_menu().
+ */
+function cordeck_custom_integrations_menu() {
+	$menu = array();
+
+	$menu['search_dropdown_callback/%'] = array(
+		'title' => t('Simple Page Callback for Cordeck\'s Search Form'),
+		'type' => MENU_CALLBACK,
+		'page arguments' => array(1),
+		'page callback' => 'cordeck_custom_integrations_return_similar_search_results',
+		'access arguments' => array('access content'),
+	);
+
+	return $menu;
+}
+
+function cordeck_custom_integrations_block_info() {
+	return array(
+		'cordeck_custom_search_block' => array(
+			'info' => t('Cordeck Custom Search Block'),
+		),
+		'cordeck_header_chat_prompt' => array(
+			'info' => t('Header Chat Prompt'),
+		),
+		'cordeck_footer_chat_box' => array(
+			'info' => t('Footer Chat and Contact Phone Number Box'),
+		),
+	);
+}
+
+function cordeck_custom_integrations_block_view($delta = '') {
+	switch($delta) {
+		case 'cordeck_custom_search_block':
+			$block = array(
+				'subject' => NULL, 
+				'description' => t("Cordeck Custom Search Block"),
+				'content' => drupal_get_form('cordeck_custom_integrations_form'),
+			);
+			return $block;
+			break;
+		case 'cordeck_header_chat_prompt':
+			$block = array(
+				'subject' => NULL, 
+				'description' => t("Cordeck Custom Header Chat Prompt"),
+				'content' => cordeck_custom_integrations_header_prompt(),
+			);
+			return $block;
+			break;
+		case 'cordeck_footer_chat_box':
+			$block = array(
+				'subject' => NULL, 
+				'description' => t("Cordeck Custom Footer Chat and Contact Box"),
+				'content' => cordeck_custom_integrations_footer_chat_prompt_box(),
+			);
+			return $block;
+			break;
+	}
+}
+
+function cordeck_custom_integrations_form() {
+	$form = array();
+
+	$form['full-search-box'] = array(
+		'#type' => 'fieldset',
+		'#attributes' => array(
+			'id' => array('cordeck_custom_search_box'),
+		),
+	);
+
+	$form['full-search-box']['search'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'id' =>  array('cordeck_custom_search_textfield'),
+			'placeholder' => t('Start your search...'),
+			'autocomplete' => 'off',
+		), 
+		'#maxlength' => 55,
+	);
+
+	$form['full-search-box']['submit-button'] = array(
+		'#type' => 'submit',
+		'#value' => '',
+		'#prefix' => '<div class="glyphicon glyphicon-search">',
+		'#suffix' => '</div>',
+	);
+
+	$form['full-search-box']['results_box'] = array(
+		'#type' => 'markup',
+		'#markup' => '<div id="cordeck_custom_search_results"></div>',
+	);
+
+	return $form; 
+}
+
+/*
+ *  Checks if users are logged in on the admin side of our Rocket Chat app
+ */
+function cordeck_custom_integrations_check_if_chat_available() {
+  $check = &drupal_static(__function__);  
+  $chat_available = &drupal_static(__function__);
+
+	if(!$check) {
+  		$check = file_get_contents('http://45.55.196.34:3000/api/v1/livechat/activeusers');
+  		$check = json_decode($check); 
+  	if($check->users >= 1) {
+  		drupal_add_js(drupal_get_path('module','cordeck_custom_integrations').'/js/cordeck_rocket_chat_init.js');
+  		$chat_available = true;
+  	} else {
+  		$chat_available = false; 
+  	}
+  } 
+
+  return $chat_available; 
+}
+
+function cordeck_custom_integrations_form_submit($form, &$form_state) {
+	drupal_goto('/search/'.$form_state['values']['search']);
+}
+
+function cordeck_custom_integrations_header_prompt() {
+  $available = cordeck_custom_integrations_check_if_chat_available();
+  $content = ""; 
+  if($available) {
+  	$content .= '<p><a onclick="popupChat()" class="chat-click"><em><i aria-hidden="true" class="fa fa-comments-o">&nbsp;</i>or <strong>chat now</strong> with a Cordeck representative</em></a></p>';
+  }
+  return $content; 
+}
+
+function cordeck_custom_integrations_footer_chat_prompt_box() {
+	$available = cordeck_custom_integrations_check_if_chat_available();
+	$content = "";
+	$chat_text = "";
+	$chat_now = "";
+	$social_media_block = block_get_blocks_by_region('social_media')['block_6'];
+
+	if($available) {
+		$chat_text .= '<p><a onclick="popupChat()" class="chat-click"><i aria-hidden="true" class="fa fa-comments-o"></i> Chat online now</a></p>';
+		$chat_now .= '<a onclick="popupChat()" class="chat-click">or chat</a>';
+	}
+
+	$content .= '<div class="footer-chat-contact-box">
+				  <div class="container">
+				    <div class="row chat-box-body">
+				      <div class="col-sm-6">
+				        <a href="/"><img src="' . theme_get_setting('logo') . '"></a>
+				      </div>
+					  <div class="col-sm-6">
+						<p>'. $chat_text . '</p>
+						<p><a href="tel:877-857-6400"><i class="fa fa-phone-square" aria-hidden="true"></i> Call 877-857-6400</a></p>
+						<p><a href="/contact/request-a-quote"><i class="fa fa-calculator" aria-hidden="true"></i>Request a Quote</a></p>
+					   </div>
+					</div>
+					<div class="row chat-box-footer">
+	                  <div class="col-md-9 col-sm-8">
+	                    <p><strong>Know exactly what you need?</strong> <a href="#">Complete our online quote request form</a></p>
+	                    <p class="footnote">* Average response time: 15 minutes, Monday&ndash;Friday. Call '.$chat_now.' now to speak with a Dexpert<sup>&trade;</sup> immediately.</p>
+	                  </div>
+	                  <div class="col-md-3 col-sm-4">'
+	                   	. render($social_media_block) .  
+	                  '</div>
+					</div>
+				  </div>
+			    </div>';
+  
+	return $content; 
+}
+
+/* Queries and sends results for header search box via ajax
+ * query calls a databas view called productjoin2
+ */
+function cordeck_custom_integrations_return_similar_search_results($string) {
+	$products = array();
+
+	$results = db_select('productjoin2','p')
+		->fields('p')
+		->condition('p.title','%'.db_like($string).'%','LIKE')
+		->execute()
+		->fetchAll();
+
+	foreach($results as $result){
+		$result->path = drupal_get_path_alias('node/'.$result->nid); 
+		$result->uri = empty($result->schematicfile) ? "" : file_create_url($result->schematicfile);
+		$result->f2_uri = empty($result->profilefile) ? "" : file_create_url($result->profilefile);
+		$result->guage = str_replace(',', ', ', $result->guage);
+		$result->width = str_replace(',', ', ', $result->width);
+	
+		$products[] = $result;
+	}
+	print json_encode($products);
+	die(); 
+}

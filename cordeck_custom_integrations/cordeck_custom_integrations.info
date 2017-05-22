@@ -1,0 +1,4 @@
+name = Cordeck Custom Integrations
+description = Integrates custom search, Rocket Chat, and other functionality into the Cordeck Website.
+core = 7.x
+scripts[] = js/cordeck_custom_search.js

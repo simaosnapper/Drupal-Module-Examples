@@ -1,0 +1,8 @@
+name = Cordeck Custom Quote Feature
+description = Creates a Cordeck custom quote mechanism.
+core = 7.x
+dependencies[] = file
+dependencies[] = mailgun
+
+scripts[] = js/mailgun-email-validator/mailgun_validator.js
+scripts[] = js/cordeck_custom_quote.js

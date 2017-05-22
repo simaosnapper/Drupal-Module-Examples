@@ -1,0 +1,1022 @@
+<?php
+
+/*
+ *  Implements hook_menu().
+ */
+function cordeck_custom_quote_menu() {
+	$menu = array();
+
+	$menu['contact/request-a-quote'] = array(
+		'title' => t('Request Custom Quote(s)'),
+		'access callback' => TRUE,
+		'page arguments' => array('cordeck_custom_quote_form'),
+		'page callback' => 'drupal_get_form',
+	);
+
+	$menu['request-a-quote/get-products'] = array(
+		'title' => t('Returns options for selected product'),
+		'access callback' => TRUE,
+		'page callback' => 'cordeck_custom_quote_get_product_options',
+	);
+
+	$menu['request-a-quote/submit-quote'] = array(
+		'title' => t('Returns options for selected product'),
+		'access callback' => TRUE,
+		'page callback' => 'cordeck_custom_quote_form_submit',
+	);
+
+	$menu['admin/config/system/request-a-quote'] = array(
+		'title' => t('Request a Quote Configuration'),
+		'description' => t('Configure Cordeck Custom Quote Settings.'),
+		'access arguments' => array('administer content'),
+		'page arguments' => array('cordeck_custom_quote_configuration'),
+		'page callback' => 'drupal_get_form',
+	);
+
+	$menu['admin/config/system/request-a-quote/edit/%'] = array(
+		'title' => t('View Cordeck Custom Quote'),
+		'access arguments' => array('administer content'),
+		'page arguments' => array('cordeck_custom_quote_view_quote',5),
+		'page callback' => 'drupal_get_form',
+	);
+
+	$menu['admin/config/system/request-a-quote/delete/%/%/%'] = array(
+		'title' => t('View Cordeck Custom Quote'),
+		'access arguments' => array('administer content'),
+		'page arguments' => array('cordeck_custom_quote_delete_quote',5,6,7),
+		'page callback' => 'drupal_get_form',
+	);
+
+	return $menu;
+}
+
+function cordeck_custom_quote_view_quote($form, &$form_state, $quote_id) {
+	$form = array();
+	$rows = array();
+
+	$header = array(
+		t('First Name'),
+		t('Last Name'),
+		t('Email'),
+		t('Created'),
+		t('Delete'),
+		t('Go Back'),
+	);
+
+	$quote = db_select('cordeck_custom_quotes','c')
+		->fields('c',array('ID','first_name','last_name','email','quote_html','created','fileID'))
+		->condition('ID',$quote_id,'=')
+		->execute()
+		->fetchAssoc();
+
+	$rows[] = array(
+		$quote['first_name'],
+		$quote['last_name'],
+		$quote['email'],
+		$quote['created'],
+		'<a href="/admin/config/system/request-a-quote/delete/'.$quote['ID'].'/'.$quote['first_name'].'/'.$quote['last_name'].'">Delete</a>',
+		'<a href="/admin/config/system/request-a-quote">&laquo; Back</a>',
+	);
+
+	$table = array(
+		'header' => $header,
+		'rows' => $rows,
+		'attributes' => array(),
+		'caption' => t('Cordeck Custom Quote List'),
+		'colgroups' => array(),
+		'sticky' => array(),
+		'empty' => t('If this is empty, there is something wrong...'),
+	);
+
+	$table_markup = theme_table($table);
+
+	$form['table'] = array(
+		'#type' => 'markup',
+		'#markup' => $table_markup,
+	);
+
+	$form['info'] = array(
+		'#type' => 'markup',
+		'#markup' => decode_entities($quote['quote_html']),
+	);
+
+	return $form;
+}
+
+function cordeck_custom_quote_delete_quote($form, &$form_state, $quote_id, $first_name, $last_name) {
+	$form = array();
+
+	$form['id'] = array(
+		'#type' => 'value',
+		'#value' => $quote_id,
+	);
+
+	return confirm_form(
+		$form,
+		t('Are you sure you want to delete '.$first_name.' '.$last_name.'\'s quote?'),
+		'/admin/config/system/request-a-quote',
+		t('This action cannot be undone.'),
+		t('Delete'),
+		t('Cancel')
+	);
+
+	return $form;
+}
+
+
+function cordeck_custom_quote_delete_quote_submit($form, &$form_state) {
+	$id = $form_state['values']['id'];
+
+	$file_id = db_select('cordeck_custom_quotes','c')
+		->fields('c', array('fileID'))
+		->condition('ID',$id,'=')
+		->execute()
+		->fetchField();
+
+	$file = file_load($file_id);
+
+	if(!empty($file)) {
+		file_delete($file, TRUE);
+	}
+
+	$result = db_delete('cordeck_custom_quotes')
+		->condition('ID',$id,'=')
+		->execute();
+
+	drupal_goto('/admin/config/system/request-a-quote');
+}
+
+function cordeck_custom_quote_configuration() {
+	$form = array();
+
+	$email_list = variable_get('cordeck_admin_email_list','');
+
+	$form['cordeck_admin_email_list'] = array(
+		'#type' => 'textarea',
+		'#rows' => 5,
+		'#description' => t('List of email addresses that quote requests will be forwarded to. Separate each with a comma.'),
+		'#title' => t('Forward Quote Email List'),
+		'#default_value' => $email_list,
+	);
+
+	$form['cordeck_email_host_address'] = array(
+		'#type' => 'textfield',
+		'#title' => t('Email Host Address'),
+		'#description' => t('This is the email server all emails will be sent from when a client requests a quote'),
+		'#default_value' => variable_get('cordeck_email_host_address', ''),
+	);
+
+	$form['submit'] = array(
+		'#type' => 'submit',
+		'#value' => t('Save Configuration'),
+	);
+
+	$header = array(
+		'First Name',
+		'Last Name',
+		'Email',
+		'Created',
+		'File ID',
+		'View',
+		'Delete',
+	);
+	$rows = array();
+
+	$values = db_select('cordeck_custom_quotes','c')
+		->fields('c',array('ID','first_name','last_name','email','created','fileID'))
+		->orderBy('created','DESC')
+		->range(0,500)
+		->execute();
+
+	foreach($values as $row) {
+		$rows[] = array(
+			$row->first_name,
+			$row->last_name,
+			$row->email,
+			$row->created,
+			$row->fileID,
+			'<a href="/admin/config/system/request-a-quote/edit/'.$row->ID.'">View</a>',
+			'<a href="/admin/config/system/request-a-quote/delete/'.$row->ID.'/'.$row->first_name.'/'.$row->last_name.'">Delete</a>',
+		);
+	}
+
+	$table = array(
+		'header' => $header,
+		'rows' => $rows,
+		'attributes' => array(),
+		'caption' => t('Cordeck Custom Quote List'),
+		'colgroups' => array(),
+		'sticky' => array(),
+		'empty' => t('There are no custom client quotes currently.'),
+	);
+
+	$table_markup = theme_table($table, array());
+
+	$form['quotes_table'] = array(
+		'#type' => 'markup',
+		'#markup' => $table_markup,
+	);
+
+	return $form;
+}
+
+function cordeck_custom_quote_configuration_submit($form, &$form_state) {
+	foreach($form_state['values'] as $key=>$value) {
+		if(!empty($value)) {
+			variable_set($key,$value);
+		} else {
+			variable_del($key);
+		}
+	}
+}
+
+/*
+ *  Implements hook_form().
+ */
+function cordeck_custom_quote_form($form, &$form_state) {
+	$form = array();
+
+	$states = array(
+		'AL' => 'Alabama',
+		'AK' => 'Alaska',
+		'AZ' => 'Arizona',
+		'AR' => 'Arkansas',
+		'CA' => 'California',
+		'CO' => 'Colorado',
+		'CT' => 'Connecticut',
+		'DE' => 'Delaware',
+		'DC' => 'District Of Columbia',
+		'FL' => 'Florida',
+		'GA' => 'Georgia',
+		'HI' => 'Hawaii',
+		'ID' => 'Idaho',
+		'IL' => 'Illinois',
+		'IN' => 'Indiana',
+		'IA' => 'Iowa',
+		'KS' => 'Kansas',
+		'KY' => 'Kentucky',
+		'LA' => 'Louisiana',
+		'ME' => 'Maine',
+		'MD' => 'Maryland',
+		'MA' => 'Massachusetts',
+		'MI' => 'Michigan',
+		'MN' => 'Minnesota',
+		'MS' => 'Mississippi',
+		'MO' => 'Missouri',
+		'MT' => 'Montana',
+		'NE' => 'Nebraska',
+		'NV' => 'Nevada',
+		'NH' => 'New Hampshire',
+		'NJ' => 'New Jersey',
+		'NM' => 'New Mexico',
+		'NY' => 'New York',
+		'NC' => 'North Carolina',
+		'ND' => 'North Dakota',
+		'OH' => 'Ohio',
+		'OK' => 'Oklahoma',
+		'OR' => 'Oregon',
+		'PA' => 'Pennsylvania',
+		'RI' => 'Rhode Island',
+		'SC' => 'South Carolina',
+		'SD' => 'South Dakota',
+		'TN' => 'Tennessee',
+		'TX' => 'Texas',
+		'UT' => 'Utah',
+		'VT' => 'Vermont',
+		'VA' => 'Virginia',
+		'WA' => 'Washington',
+		'WV' => 'West Virginia',
+		'WI' => 'Wisconsin',
+		'WY' => 'Wyoming',
+	);
+	
+	$form['wrapper'] = array(
+		'#type' => 'container',
+		'#attributes' => array(
+			'id' => 'cordeck_custom_quote_form_wrapper',
+		),
+	);
+
+	$form['wrapper']['quote'] = array(
+		'#type' => 'container',
+		'#attributes' => array(
+			'id' => 'quote',
+			'class' => array('quote-box'),
+			'data-quote-id' => 1,
+		),
+	);
+
+	$form['wrapper']['quote']['quote_heading'] = array(
+		'#type' => 'markup',
+		'#markup' => '<h2 class="quote-heading">Quote <span class="quote-head-increment">1</span></h3>',
+	);
+
+	$form['wrapper']['quote']['add_product'] = array(
+		'#type' => 'markup',
+		'#markup' => '<a href class="add-product" data-quote-id="1">'.t('Add Another Product').'<i class="fa fa-plus-circle add-product-i" aria-hidden="true"></i>'.t('To This Quote').'</a>',
+		'#weight' => 500,
+	);
+
+	$form['wrapper']['quote']['quote_buttons_wrapper'] = array(
+		'#type' => 'container',
+		'#attributes' => array(
+			'class' => array('quote-buttons-container'),
+		),
+	);
+
+	$form['wrapper']['quote']['quote_buttons_wrapper']['add_another_quote'] = array(
+		'#type' => 'markup',
+		'#markup' => '<a href class="add-quote">'.t("Add Another Quote").'</a>',
+		'#weight' => 501,
+	);
+
+	$form['wrapper']['quote']['quote_buttons_wrapper']['duplicate_quote'] = array(
+		'#type' => 'markup',
+		'#markup' => '<a href class="duplicate-quote">'.t("Duplicate This Quote").'</a>',
+		'#weight' => 501,
+	);
+
+	$form['wrapper']['quote']['quote_buttons_wrapper']['delete_quote'] = array(
+		'#type' => 'markup',
+		'#markup' => '<a href class="delete-quote">'.t("Delete This Quote").'</a>',
+		'#weight' => 502,
+	);
+
+	$form['wrapper']['quote']['product'] = array(
+		'#type' => 'container',
+		'#attributes' => array(
+			'data-product-id' => 1,
+			'class' => array('product'),
+		),
+	);
+
+	$form['wrapper']['quote']['product']['product_header'] = array(
+		'#type' => 'container',
+		'#attributes' => array(
+			'class' => array('product-header'),
+		),
+	);
+
+	$form['wrapper']['quote']['product']['product_header']['delete_button'] = array(
+		'#type' => 'markup',
+		'#markup' => '<a href class="delete-product">Delete</a>',
+	);
+
+	$category_options = array();
+	$query = db_select('taxonomy_vocabulary','v');
+	$query->leftJoin('taxonomy_term_data','t','v.vid = t.vid');
+	$terms = $query->fields('t',array('tid','name'))
+		->condition('v.machine_name','product_category','=')
+		->execute();
+
+	foreach($terms as $term) {
+		$category_options[$term->tid] = $term->name; 
+	}
+
+	$form['wrapper']['quote']['product']['product_header']['select_product_type'] = array(
+		'#type' => 'select',
+		'#options' => $category_options,
+		'#empty_option' => t('Product Type'),
+		'#attributes' => array(
+			'class' => array('select-product-category'),
+			'name' => 'product_type_quote_1_product_1'
+		),
+	);
+
+	$form['wrapper']['quote']['product']['product-body'] = array(
+		'#type' => 'container',
+		'#attributes' => array(
+			'class' => array('product-body'),
+		),
+	);
+
+	$form['wrapper']['quote']['product']['product-body']['product-body-left'] = array(
+		'#type' => 'container',
+		'#attributes' => array(
+			'class' => array('left-side'),
+		),
+	);
+
+	$form['wrapper']['quote']['product']['product-body']['product-body-right'] = array(
+		'#type' => 'container',
+		'#attributes' => array(
+			'class' => array('right-side'),
+		),
+	);
+
+	$form['wrapper']['add_quote_container'] = array(
+		'#type' => 'container',
+		'#attributes' => array(
+			'class' => array('add-quote-container'),
+		),
+	);
+
+	$form['wrapper']['add_quote_container']['add_quote'] = array(
+		'#type' => 'markup',
+		'#markup' => '<button class="add-quote">'.t("Add another quote").'</button>',
+	);
+
+	$form['contact_wrapper'] = array(
+		'#type' => 'container',
+		'#attributes' => array(
+			'id' => 'cordeck_custom_quote_contact_form',
+		),
+	);
+
+	$form['contact_wrapper']['general_info'] = array(
+		'#type' => 'fieldset',
+		'#title' => t('General Info'),
+	);
+
+	$form['contact_wrapper']['general_info']['customer_type'] = array(
+		'#type' => 'radios',
+		'#options' => array(
+			0 => t('New Customer'),
+			1 => t('Returning Customer'),
+		),
+		'#weight' => 0,
+		'#default_value' => 0,
+	);
+
+	$form['contact_wrapper']['general_info']['first_name'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('First Name*'),
+			'required' => 'required'
+		),
+	);
+
+	$form['contact_wrapper']['general_info']['last_name'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('Last Name*'),
+			'required' => 'required'
+		),
+	);
+
+	$form['contact_wrapper']['general_info']['email'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('Email*'),
+			'required' => 'required',
+		),
+		'#suffix' => '<div id="email-message"></div>',
+	);
+
+	$form['contact_wrapper']['general_info']['company'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('Company*'),
+			'required' => 'required'
+		),
+	);
+
+	$form['contact_wrapper']['general_info']['job_title'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('Job Title'),
+		),
+		'#states' => array(
+			'invisible' => array(
+				':input[name="customer_type"]' => array('value' => 1),
+			),
+		),
+	);
+
+	$form['contact_wrapper']['general_info']['address'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('Address*'),
+		),
+		'#states' => array(
+			'invisible' => array(
+				':input[name="customer_type"]' => array('value' => 1),
+			),
+		),
+	);
+
+	$form['contact_wrapper']['general_info']['address2'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('Address 2'),
+		),
+		'#states' => array(
+			'invisible' => array(
+				':input[name="customer_type"]' => array('value' => 1),
+			),
+		),
+	);
+
+	$form['contact_wrapper']['general_info']['city'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('City*'),
+		),
+		'#states' => array(
+			'invisible' => array(
+				':input[name="customer_type"]' => array('value' => 1),
+			),
+		),
+	);
+
+	$form['contact_wrapper']['general_info']['state'] = array(
+		'#type' => 'select',
+		'#empty_option' => t('State'),
+		'#options' => $states,
+		'#states' => array(
+			'invisible' => array(
+				':input[name="customer_type"]' => array('value' => 1),
+			),
+		),
+	);
+
+	$form['contact_wrapper']['general_info']['zip'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('Zip Code*'),
+		),
+		'#states' => array(
+			'invisible' => array(
+				':input[name="customer_type"]' => array('value' => 1),
+			),
+		),
+	);
+
+	$form['contact_wrapper']['general_info']['phone'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('Phone Number*'),
+			'required' => 'required',
+		),
+	);
+
+	$form['contact_wrapper']['general_info']['fax'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('Fax Number'),
+		),
+		'#states' => array(
+			'invisible' => array(
+				':input[name="customer_type"]' => array('value' => 1),
+			),
+		),
+	);
+
+	$form['contact_wrapper']['ship_to_address'] = array(
+		'#type' => 'fieldset',
+		'#title' => t('Address'),
+	);
+
+	$form['contact_wrapper']['ship_to_address']['same_info'] = array(
+		'#type' => 'checkbox',
+		'#title' => t('Ship-To Address same as Above?'),
+		'#attributes' => array(
+			'id' => 'duplicate_general_info',
+		),
+	);
+
+	$form['contact_wrapper']['ship_to_address']['contact_name'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('Contact Name'),
+		),
+		'#states' => array(
+			'invisible' => array(
+				':input[name="same_info"]' => array('checked' => TRUE),
+			),
+		),
+	);
+
+	$form['contact_wrapper']['ship_to_address']['ship_to_address'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('Address'),
+		),
+		'#states' => array(
+			'invisible' => array(
+				':input[name="same_info"]' => array('checked' => TRUE),
+			),
+		),
+	);
+
+	$form['contact_wrapper']['ship_to_address']['ship_to_address2'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('Address 2'),
+		),
+		'#states' => array(
+			'invisible' => array(
+				':input[name="same_info"]' => array('checked' => TRUE),
+			),
+		),
+	);
+
+	$form['contact_wrapper']['ship_to_address']['ship_to_city'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('City'),
+		),
+		'#states' => array(
+			'invisible' => array(
+				':input[name="same_info"]' => array('checked' => TRUE),
+			),
+		),
+	);
+
+	$form['contact_wrapper']['ship_to_address']['ship_to_state'] = array(
+		'#type' => 'select',
+		'#empty_option' => t('state'),
+		'#options' => $states,
+		'#states' => array(
+			'invisible' => array(
+				':input[name="same_info"]' => array('checked' => TRUE),
+			),
+		),
+	);
+
+	$form['contact_wrapper']['ship_to_address']['ship_to_zip'] = array(
+		'#type' => 'textfield',
+		'#attributes' => array(
+			'placeholder' => t('Zip'),
+		),
+		'#states' => array(
+			'invisible' => array(
+				':input[name="same_info"]' => array('checked' => TRUE),
+			),
+		),
+	);
+
+	$form['contact_wrapper']['form_footer'] = array(
+		'#type' => 'fieldset',
+		'#title' => t('Additional Information'),
+	);
+
+	$form['contact_wrapper']['form_footer']['general_comments'] = array(
+		'#type' => 'textarea',
+		'#rows' => 3,
+		'#resizable' => false,
+		'#attributes' => array(
+			'placeholder' => t('General Comments'),
+		),
+	);
+
+	$form['contact_wrapper']['form_footer']['attached_file'] = array(
+		'#type' => 'file',
+		'#title' => t('Do you have any project drawings/details to share? (Max Upload 5MB)'),
+		'#attributes' => array(
+			'placeholder' => t('Cool File'),
+			'accept' => '.pdf,.txt,.zip,.doc,.docx,.zip,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,application/zip',
+		),
+	);
+
+	$form['submit'] = array(
+		'#type' => 'submit',
+		'#value' => t('Submit Quote'),
+		'#prefix' => '<div class="submit-box">',
+		'#suffix' => '</div>',
+	);
+
+	return $form;
+}
+
+/*
+ * Retrieves and processes products array for use on the Request a Quote page 
+ */
+function cordeck_custom_quote_get_product_options() {
+	$nodes = array();
+	$nodes_ungrouped = array();
+	
+	//Get all product nodes
+	$nids = db_select('node','n')
+		->fields('n',array('nid'))
+		->condition('type','product','=')
+		->execute();
+
+	//processess products into a custom product array for use in JavaScript
+	foreach($nids as $nid=>$value) {
+		$node = node_load($value->nid);
+
+		foreach($node as $field=>$value) {
+			switch($field) {
+				case 'field_gauge':
+				case 'field_width':
+				case 'field_finishes':
+					if(!empty($value['und'])) {
+						$node->{$field} = array();
+						$tids = array();
+						foreach($value['und'] as $term_raw) {
+							$tids[] = $term_raw['tid'];
+						}
+						$terms = db_select('taxonomy_term_data','t')
+							->fields('t',array('name'))
+							->condition('tid',$tids,'IN')
+							->orderBy('weight','ASC')
+							->execute();
+						
+						foreach($terms as $term) {
+							$node->{$field}[] = $term->name;
+						}
+					} else {
+						unset($node->{$field});
+					}
+					break;
+				
+				case 'field_profile_image':
+				case 'field_schematic_drawing':
+					if(!empty($node->{$field}['und'][0]['uri'])) {
+						$uri = $node->{$field}['und'][0]['uri'];
+						$url = file_create_url($uri);
+						$node->{$field} = $url;
+					} else {
+						unset($node->{$field});
+					}
+					break;
+
+				case 'field_acoustic':
+				case 'field_length':
+				case 'field_degrees':
+				case 'field_number_of_pieces':
+				case 'field_product_name':
+					if(!empty($node->{$field}['und'])) {
+						$node->{$field} = $node->{$field}['und'][0]['value'];
+					} else {
+						unset($node->{$field});
+					}
+					break;
+
+				case 'field_accessory_dimensions':
+				case 'field_squares_dimensions':
+					if(!empty($node->{$field}['und'])) {
+						$new_field = array();
+						foreach($node->{$field}['und'] as $value) {
+							$new_field[] = $value['value'];
+						}
+						$node->{$field} = $new_field;
+					} else {
+						unset($node->{$field});
+					}
+					break;
+
+				case 'nid':
+				case 'type':
+				case 'field_product_category':
+				case 'title':
+					break;
+
+				//if we have no use for the field we just get rid of it
+				default: 
+					unset($node->{$field}); 
+					break;
+
+			}
+		}
+		$nodes_ungrouped[] = $node;
+	}
+
+	foreach($nodes_ungrouped as $ungrouped_node) {
+		$nodes[$ungrouped_node->field_product_category['und'][0]['tid']][$ungrouped_node->nid] = $ungrouped_node;
+	}
+
+	print json_encode($nodes);
+	die;
+}
+
+/*
+ *  Implements hook_theme()
+ */
+function cordeck_custom_quote_theme() {
+	return array(
+		'cordeck_quote' => array(
+			'template' => 'templates/admin_email',
+			'variables' => array(
+				'quotes' => NULL,
+				'contact' => NULL,
+				'file_link' => NULL,
+			),
+		),
+		'cordeck_client_email' => array(
+			'template' => 'templates/client_email',
+			'variables' => array(
+				'first_name' => NULL,
+			),
+		),
+	);
+}
+
+/*
+ *  Implements hook_preprocess_HOOK()
+ *  Preprocesses variables for the Cordeck Admin Quote Email
+ */
+function template_preprocess_cordeck_quote(&$variables) {
+	$contact_info = array();
+	$quote_info = array();
+	$quote_number = 1;
+
+	foreach($variables['contact'] as $contact_field) {
+		$contact_info[ucwords(str_replace('_',' ', $contact_field->name))] = check_plain($contact_field->value);
+	}
+
+	foreach($variables['quotes'] as $quote) {
+		$quote_info['Quote '.$quote_number] = array();
+		$product_number = 1;
+		foreach($quote as $product) {
+			$quote_info['Quote '.$quote_number][$product_number] = array();
+			foreach($product as $detail) {
+
+				$field_values = explode('_', $detail->name);
+				$name = $field_values[0];
+
+				switch ($name) {
+					case 'product':
+						$quote_info['Quote '.$quote_number][$product_number]['Product Name'] = db_select('field_data_field_product_name','n')
+							->fields('n',array('field_product_name_value'))
+							->condition('entity_id',$detail->value,'=')
+							->execute()
+							->fetchField();
+						break;
+
+					case 'dimension':
+						$dimension = $field_values[1];
+						$quote_info['Quote '.$quote_number][$product_number][ucwords($name.' '.$dimension)] = check_plain($detail->value);
+						break;
+						
+					default:
+						if(!empty($detail->value)) {
+							$index = ($name == 'field') ? 1 : 0;
+					    	$quote_info['Quote '.$quote_number][$product_number][ucwords($field_values[$index])] = check_plain($detail->value);
+					    }
+					    break;
+				}
+			}
+			$product_number++; 
+		}
+		$quote_number++; 
+	}
+
+	$variables['quotes'] = $quote_info;
+	$variables['contact'] = $contact_info;
+}
+
+/*
+ *  Implements hook_form_submit().
+ *  We hacked this function to not run by default but only when ajax calls 
+ *  the path that calls this function. (request-a-quote/submit-quote).  The function
+ *  sends emails to both the user and the quote professionals, saves any related files,
+ *  and returns a success or error message to the client.
+ */
+function cordeck_custom_quote_form_submit($form, &$form_state) {
+
+	$quotes = json_decode($_POST['data']);
+	$contact = json_decode($_POST['contact']);
+
+	//If the quote is empty return an error and MAKE(FORCE BY VIOLENCE :-D) them to specify at least one product
+	if(empty($quotes[0][0][0]->value)){
+		$message = array(
+			'type' => 'error',
+			'message' => t('Quote cannot be empty. Please specify products you are interested in and try again.')
+		);
+		print json_encode($message);
+		exit();
+	}
+
+	if(!empty($quotes) && !empty($contact)) {
+		// If an email was attached we save it using Drupal's file api,
+		// we also save the file id in the database so we can delete it later on if we want.
+		if(!empty($_FILES['file'])) {
+
+			$path_parts = pathinfo($_FILES['file']['name']);
+			$extension = $path_parts['extension'];
+
+			// Check the extension and return an error if it's not what we're looking for.
+			// If everything looks good we save the file using Drupal's file management system. 
+			if($extension == 'pdf' || $extension == 'txt' || $extension == 'zip' || $extension == 'doc' || $extension == 'docx') {
+				$file_data = file_get_contents($_FILES['file']['tmp_name']);
+				if(strlen($_FILES['file']['name']) > 55) {
+					$filename = substr($_FILES['file']['name'],0,55);
+				} else {
+					$filename = $_FILES['file']['name'];
+				}
+				$file = file_save_data($file_data,"public://quotes/".$filename,FILE_EXISTS_RENAME);
+
+				$filepath = file_create_url($file->uri);
+				$attachment = array(
+					'attachment' => array($filepath),
+				);
+
+				if($file){
+					$file_link = file_create_url($file->uri);
+				}
+			} else {
+				$message = array(
+					'type' => 'error',
+					'message' => 'Sorry, only .pdf, .txt, .zip, .doc, and .docx file extensions are allowed.',
+				);
+				print json_encode($message);
+				exit;
+			}
+		} 
+
+		// Prepare each field to be saved to the database
+		foreach($contact as $contact_field) {
+			$field_name = $contact_field->name;
+
+			switch ($field_name) {
+				case 'first_name':
+					$first_name = check_plain($contact_field->value);
+				break;
+
+				case 'last_name':
+					$last_name = check_plain($contact_field->value);
+				break;
+
+				case 'email':
+					$email = check_plain($contact_field->value);
+				break; 
+			}
+		}
+
+		//Create admin email html to be sent in Mailgun
+		$admin_output = theme('cordeck_quote', array(
+			'quotes' => $quotes,
+			'contact' => $contact,
+			'file_link' => $file_link,
+		));
+
+		//Create client email html to be sent in Mailgun
+		$cordeck_client_email = theme('cordeck_client_email', array(
+			'first_name' => $first_name,
+		));
+
+		$result = db_insert('cordeck_custom_quotes')
+			->fields(array(
+				'first_name' => $first_name,
+				'last_name' => $last_name,
+				'email' => $email,
+				'quote_html' => check_plain($admin_output),
+				'fileID' => !empty($file->fid) ? $file->fid : NULL,
+			))->execute();
+
+		//instantiate MailGun client
+		$client = mailgun_get_client();
+
+		$raw_email_list = variable_get('cordeck_admin_email_list','');
+		$email_list = trim(str_replace(' ', '', $raw_email_list));
+		$site_name = variable_get('site_name','');
+
+		//Send admin email
+		$result = $client->sendMessage(variable_get('cordeck_email_host_address', ''), array(
+			'from' => '<noreply@devmail.lowebhost.com>',
+			'to' => $email_list,
+			'subject' => "Cordeck Custom Quote Request",
+			'html' => $admin_output,
+		));
+
+		//Send client Email
+		$client_result = $client->sendMessage(variable_get('cordeck_email_host_address', ''), array(
+			'from' => '<noreply@devmail.lowebhost.com>',
+			'to' => $email,
+			'subject' => "Thank You For Your Interest in Cordeck Products",
+			'html' => $cordeck_client_email,
+		));
+
+		$message = array(
+			'type' => 'success',
+			'message' => t('Thank you for you interest in Cordeck Products. We will be in contact with you shortly.'),
+		);
+	} else {
+		$message = array(
+			'type' => 'error',
+			'message' => t('Something went wrong, please try again. If the problem persists please contact us directly at (877) 857-6400.'),
+		);
+	}
+	
+	print json_encode($message); 
+	exit;
+}
+
+/*
+ *  Implements hook_block_info()
+ *
+ *  Simply create a block for use in the Request a Quote page.
+ */
+function cordeck_custom_quote_block_info() {
+	return array(
+		'cordeck_custom_quote_form_block' => array(
+			'info' => t('Cordeck Custom Quote Form Block'),
+		),
+	);
+}
+
+/*
+ *  Implements hook_block_view().
+ */
+function cordeck_custom_quote_block_view($delta = '') {
+  if($delta == 'cordeck_custom_quote_form_block') {
+		$block = array(
+			'subject' => NULL, 
+			'description' => t("Cordeck Custom Quote Form Block"),
+			'content' => drupal_get_form('cordeck_custom_quote_form'),
+		);
+		return $block; 
+  }
+}
